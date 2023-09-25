@@ -16,6 +16,7 @@ from sklearn import metrics
 from torchvision.models import ResNet50_Weights
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import csv
+import datetime
 
 class ODIRDataset(Dataset):
     def __init__(self, dataframe, img_dir, transforms=None):
@@ -127,6 +128,8 @@ loss_weight = torch.tensor([1, 1.2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.2]).to(device)
 criterion = nn.BCEWithLogitsLoss(pos_weight=loss_weight)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+model_checkpoint_name = f'best_model_{timestamp}.pth'
 
 def train(model, num_epochs, train_dataloader, validation_dataloader):
 
@@ -151,7 +154,7 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
         scheduler.step(val_loss)
         if average_score > best_score:
             best_score = average_score
-            torch.save(model.state_dict(), 'best_model.pth')
+            torch.save(model.state_dict(), model_checkpoint_name)
             print(f"Score increased to {average_score:.4f}. Model saved!")
         print(f"Epoch {epoch + 1}/{num_epochs}")
         print(f"  average score: {average_score:.4f}")
