@@ -1,0 +1,1 @@
+This repository is about ODIR 2019 challenge 
