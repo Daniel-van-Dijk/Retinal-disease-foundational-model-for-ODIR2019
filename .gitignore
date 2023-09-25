@@ -19,6 +19,9 @@ Thumbs.db
 *.log
 *.out
 
+# Ignore model weights files
+*.pth
+
 # Ignore compiled code or binary files
 *.dll
 *.so
