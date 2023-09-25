@@ -92,7 +92,7 @@ def evaluate(model, dataloader, device, criterion):
     all_logits = np.vstack(all_logits)
 
     all_preds = (all_logits > 0.5).astype(np.float32)
-
+    # val_loss, average_score, kappa, f1, auc, val_confusion, val_accuracy
     kappa, f1, auc, final_score = ODIR_Metrics(all_labels, all_preds)
 
     return val_loss / len(dataloader), final_score, kappa, f1, auc
@@ -101,8 +101,8 @@ class ResNet_baseline(nn.Module):
     def __init__(self, num_diseases=8):
         super(ResNet_baseline, self).__init__()
         self.resnet = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-        self.fc1 = nn.Linear(2 * 1000, 512)
-        self.fc2 = nn.Linear(512, num_diseases)
+        self.fc1 = nn.Linear(2 * 1000, 256)
+        self.fc2 = nn.Linear(256, num_diseases)
 
     def forward(self, img_left, img_right):
         x_left = self.resnet(img_left)
@@ -137,7 +137,8 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
     for epoch in range(num_epochs):
 
         model.train()  # set the model to training mode
-        for (img_left, img_right), labels in tqdm(train_dataloader):
+        pbar = tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}", ncols=100)
+        for (img_left, img_right), labels in pbar:
             optimizer.zero_grad()
             img_left, img_right = img_left.to(device), img_right.to(device)
             labels = labels.to(device)
@@ -145,8 +146,8 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-        # average_metric, kappa, f1, auc, confusion_matrix, accuracy
-        val_loss, average_score, kappa, f1, auc, val_confusion, val_accuracy = evaluate(model, validation_dataloader, device, criterion)
+        # average_metric, kappa, f1, auc
+        val_loss, average_score, kappa, f1, auc = evaluate(model, validation_dataloader, device, criterion)
         scheduler.step(val_loss)
         if average_score > best_score:
             best_score = average_score
@@ -157,7 +158,7 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
         print(f"  f1: {f1:.4f}")
         print(f"  kappa: {kappa:.4f}")
         print(f"  auc: {auc:.4f}")
-        print(f"  Val Accuracy: {val_accuracy:.4f}")
+        #print(f"  Val Accuracy: {val_accuracy:.4f}")
         #print("  Val Confusion Matrix:")
         #print(val_confusion)
 

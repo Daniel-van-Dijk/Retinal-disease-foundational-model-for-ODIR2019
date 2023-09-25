@@ -17,6 +17,7 @@ Thumbs.db
 
 # Ignore log files
 *.log
+*.out
 
 # Ignore compiled code or binary files
 *.dll
