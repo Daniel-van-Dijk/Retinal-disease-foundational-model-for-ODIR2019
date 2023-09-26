@@ -92,7 +92,7 @@ print(device)
 
 
 model = ResNet_baseline().to(device)
-checkpoint = torch.load("/home/scur0556/ODIR2019/best_model.pth", map_location=device)
+checkpoint = torch.load("/home/scur0556/ODIR2019/best_model_20230925_1657.pth", map_location=device)
 model.load_state_dict(checkpoint)
 
 # check logit_output param

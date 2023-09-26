@@ -61,7 +61,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
 validation_dataloader = DataLoader(validation_dataset, batch_size=128, shuffle=False)
 
 
-#calculate kappa, F-1 socre and AUC value
+#calculate kappa, F1-score and AUC value
 def ODIR_Metrics(gt_data, pr_data):
     """ function from ODIR2019 challenge """
     th = 0.5
@@ -165,7 +165,7 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
         #print("  Val Confusion Matrix:")
         #print(val_confusion)
 
-train(model, 10, train_dataloader, validation_dataloader)
+train(model, 50, train_dataloader, validation_dataloader)
 
 
 # class TestDataset(Dataset):
