@@ -119,7 +119,7 @@ def crop_train_images(df, train_dir, cropped_dir):
     execution_time = end_time - start_time
     print(f"Execution time: {execution_time:.2f} seconds")
 
-# crop_train_images(df, "data/ODIR-5K_Training_Images", "data/cropped_ODIR-5K_Training_Images")
+# crop_train_images(df, data/ODIR-5K_Training_Dataset, data/cropped_ODIR-5K_Training_Dataset)
 
 def crop_test_images(test_dir, cropped_dir):
     if not os.path.exists(cropped_dir):
