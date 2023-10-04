@@ -119,7 +119,7 @@ def crop_train_images(df, train_dir, cropped_dir):
     execution_time = end_time - start_time
     print(f"Execution time: {execution_time:.2f} seconds")
 
-# crop_train_images(df, data/ODIR-5K_Training_Dataset, data/cropped_ODIR-5K_Training_Dataset)
+crop_train_images(df, "data/ODIR-5k_Training_Images/", "data/cropped_ODIR-5K_Training_Images")
 
 def crop_test_images(test_dir, cropped_dir):
     if not os.path.exists(cropped_dir):
@@ -131,4 +131,4 @@ def crop_test_images(test_dir, cropped_dir):
             restult = fov_extraction(img_path, filename, cropped_dir)
 
 
-crop_test_images("data/ODIR-5K_Testing_Images", "data/cropped_ODIR-5K_Testing_Images")
+crop_test_images("data/ODIR-5K_Testing_Images/", "data/cropped_ODIR-5K_Testing_Images")

@@ -54,8 +54,8 @@ df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
 
 train_df, validation_df = train_test_split(df, test_size=0.10, random_state=42)
 
-train_dataset = ODIRDataset(train_df, 'data/ODIR-5K_Training_Dataset', transforms=transform)
-validation_dataset = ODIRDataset(validation_df, 'data/ODIR-5K_Training_Dataset', transforms=transform)
+train_dataset = ODIRDataset(train_df, 'data/cropped_ODIR-5K_Training_Dataset', transforms=transform)
+validation_dataset = ODIRDataset(validation_df, 'data/cropped_ODIR-5K_Training_Dataset', transforms=transform)
 
 train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
 validation_dataloader = DataLoader(validation_dataset, batch_size=128, shuffle=False)

@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import os
 
-from models.resnet_model import ResNet_baseline
+from models.ViT_model import VisionTransformer
 
 
 from torchvision import datasets
@@ -51,7 +51,7 @@ transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),])
 
-test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/ODIR-5K_Testing_Images', transform=transform), batch_size=64, shuffle=False)
+test_loader = DataLoader(TestDataset('/home/scur0547/ODIR2019/data/cropped_ODIR-5K_Testing_Images', transform=transform), batch_size=64, shuffle=False)
 
 
 
@@ -91,8 +91,8 @@ print(device)
 
 
 
-model = ResNet_baseline().to(device)
-checkpoint = torch.load("/home/scur0556/ODIR2019/best_model_20230925_1657.pth", map_location=device)
+model = VisionTransformer(8).to(device)
+checkpoint = torch.load("/home/scur0547/ODIR2019/best_model_20231003_1437.pth", map_location=device)
 model.load_state_dict(checkpoint)
 
 # check logit_output param
