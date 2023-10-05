@@ -10,6 +10,7 @@ import numpy as np
 import os
 import time
 from pathlib import Path
+import pandas as pd
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -21,10 +22,11 @@ assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+from sklearn.model_selection import train_test_split
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset
+from util.datasets import build_dataset, ODIRDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
@@ -115,14 +117,14 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument('--data_path', default='/home/jupyter/Mor_DR_data/data/data/IDRID/Disease_Grading/', type=str,
                         help='dataset path')
-    parser.add_argument('--nb_classes', default=1000, type=int,
+    parser.add_argument('--nb_classes', default=8, type=int,
                         help='number of the classification types')
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
@@ -166,9 +168,14 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = build_dataset(is_train='train', args=args)
-    dataset_val = build_dataset(is_train='val', args=args)
-    dataset_test = build_dataset(is_train='test', args=args)
+    # dataset_train = build_dataset(is_train='train', args=args)
+    # dataset_val = build_dataset(is_train='val', args=args)
+    # dataset_test = build_dataset(is_train='test', args=args)
+    df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    train_df, validation_df = train_test_split(df, test_size=0.15, random_state=42)
+    dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
+    dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -187,15 +194,15 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
             
-        if args.dist_eval:
-            if len(dataset_test) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_test = torch.utils.data.DistributedSampler(
-                dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        else:
-            sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+        # if args.dist_eval:
+        #     if len(dataset_test) % num_tasks != 0:
+        #         print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+        #               'This will slightly alter validation results as extra duplicate entries are added to achieve '
+        #               'equal num of samples per-process.')
+        #     sampler_test = torch.utils.data.DistributedSampler(
+        #         dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
+        # else:
+        #     sampler_test = torch.utils.data.SequentialSampler(dataset_test)
             
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
@@ -204,29 +211,48 @@ def main(args):
     else:
         log_writer = None
 
+
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
+        dataset_train, 
+        sampler=sampler_train, 
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=True,
+        drop_last=True
     )
 
     data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
+        dataset_val, 
+        sampler=sampler_val, 
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
     )
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False
-    )
+    # data_loader_train = torch.utils.data.DataLoader(
+    #     dataset_train, sampler=sampler_train,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    #     pin_memory=args.pin_mem,
+    #     drop_last=True,
+    # )
+
+    # data_loader_val = torch.utils.data.DataLoader(
+    #     dataset_val, sampler=sampler_val,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    #     pin_memory=args.pin_mem,
+    #     drop_last=False
+    # )
+
+    # data_loader_test = torch.utils.data.DataLoader(
+    #     dataset_test, sampler=sampler_test,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    #     pin_memory=args.pin_mem,
+    #     drop_last=False
+    # )
     
     
     mixup_fn = None
