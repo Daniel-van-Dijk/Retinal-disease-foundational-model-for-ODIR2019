@@ -31,6 +31,7 @@ from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_vit
+from ODIR_model import ODIRmodel
 
 from engine_finetune import train_one_epoch, evaluate
 
@@ -264,38 +265,66 @@ def main(args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
     
-    model = models_vit.__dict__[args.model](
+    base_vit_model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         drop_path_rate=args.drop_path,
         global_pool=args.global_pool,
     )
 
+    # if args.finetune and not args.eval:
+    #     checkpoint = torch.load(args.finetune, map_location='cpu')
+
+    #     print("Load pre-trained checkpoint from: %s" % args.finetune)
+    #     checkpoint_model = checkpoint['model']
+    #     state_dict = model.state_dict()
+    #     for k in ['head.weight', 'head.bias']:
+    #         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+    #             print(f"Removing key {k} from pretrained checkpoint")
+    #             del checkpoint_model[k]
+
+    #     # interpolate position embedding
+    #     interpolate_pos_embed(model, checkpoint_model)
+
+    #     # load pre-trained model
+    #     msg = model.load_state_dict(checkpoint_model, strict=False)
+    #     print(msg)
+
+    #     if args.global_pool:
+    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+    #     else:
+    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+
+    #     # manually initialize fc layer
+    #     trunc_normal_(model.head.weight, std=2e-5)
+
+    # model.to(device)
+    # Instantiate a pre-trained Vision Transformer model.
+    base_vit_model = models_vit.__dict__[args.model](
+        num_classes=args.nb_classes,  # May not be necessary depending on your needs.
+        drop_path_rate=args.drop_path,
+        global_pool=args.global_pool,
+    )
+
+    # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
-
         print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
-        state_dict = model.state_dict()
+        
+        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
         for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            if k in checkpoint['model']:
                 print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+                del checkpoint['model'][k]
 
-        # interpolate position embedding
-        interpolate_pos_embed(model, checkpoint_model)
+        # Load pre-trained weights into the Vision Transformer model.
+        # Note: Adaptation might be needed depending on checkpoint format.
+        base_vit_model.load_state_dict(checkpoint['model'], strict=False)
 
-        # load pre-trained model
-        msg = model.load_state_dict(checkpoint_model, strict=False)
-        print(msg)
-
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
-
-        # manually initialize fc layer
-        trunc_normal_(model.head.weight, std=2e-5)
-
+    # Instantiate your custom model using the pre-trained Vision Transformer as a base.
+    model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
+    print('odir', model)
+    
+    # Move the model to the device (e.g., GPU).
     model.to(device)
 
     model_without_ddp = model
@@ -327,26 +356,28 @@ def main(args):
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr)
     loss_scaler = NativeScaler()
 
-    if mixup_fn is not None:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    # if mixup_fn is not None:
+    #     # smoothing is handled with mixup label transform
+    #     criterion = SoftTargetCrossEntropy()
+    # elif args.smoothing > 0.:
+    #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+    # else:
+    criterion = torch.nn.BCEWithLogitsLoss()
+
 
     print("criterion = %s" % str(criterion))
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
     if args.eval:
-        test_stats,auc_roc = evaluate(data_loader_test, model, device, args.task, epoch=0, mode='test',num_class=args.nb_classes)
+        test_stats,auc_roc = evaluate(data_loader_val, model, device, args.task, epoch=0, mode='test',num_class=args.nb_classes)
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
     max_auc = 0.0
+    best_final_score = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -358,9 +389,15 @@ def main(args):
             args=args
         )
 
-        val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
-        if max_auc<val_auc_roc:
-            max_auc = val_auc_roc
+        # After training for one epoch, let's validate the model.
+        val_loss, final_score, kappa, f1, auc = evaluate(model, data_loader_val, device, criterion)
+    
+        # Log validation metrics
+        print(f"Validation Loss: {val_loss:.4f}, Final Score: {final_score:.4f}, Kappa: {kappa:.4f}, F1: {f1:.4f}, AUC: {auc:.4f}")
+        
+        # Check if this is the best model so far
+        if final_score > best_final_score:
+            best_final_score = final_score
             
             if args.output_dir:
                 misc.save_model(
@@ -369,13 +406,13 @@ def main(args):
         
 
         if epoch==(args.epochs-1):
-            test_stats,auc_roc = evaluate(data_loader_test, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
+            test_stats,auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
 
         
-        if log_writer is not None:
-            log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
-            log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
-            log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
+        # if log_writer is not None:
+        #     log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
+        #     log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
+        #     log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
             
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
