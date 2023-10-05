@@ -172,7 +172,9 @@ def main(args):
     # dataset_train = build_dataset(is_train='train', args=args)
     # dataset_val = build_dataset(is_train='val', args=args)
     # dataset_test = build_dataset(is_train='test', args=args)
-    df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+
+    # can use read_csv now for balanced_df in stead of read_excel
+    df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
     df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     train_df, validation_df = train_test_split(df, test_size=0.15, random_state=42)
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
@@ -400,9 +402,20 @@ def main(args):
             best_final_score = final_score
             
             if args.output_dir:
-                misc.save_model(
-                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                    loss_scaler=loss_scaler, epoch=epoch)
+                # not sure how this works with distributed training so TODO
+                # misc.save_model(
+                #     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                #     loss_scaler=loss_scaler, epoch=epoch)
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_final_score': best_final_score,
+                    # ... any other states you wish to save ...
+                }
+                checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+                torch.save(checkpoint, checkpoint_path)
+                print("Model checkpoint saved at", checkpoint_path)
         
 
         if epoch==(args.epochs-1):

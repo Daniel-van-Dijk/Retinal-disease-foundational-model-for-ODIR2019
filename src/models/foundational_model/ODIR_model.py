@@ -21,3 +21,7 @@ class ODIRmodel(nn.Module):
         
         output = self.classifier(combined_features)
         return output
+    
+    def no_weight_decay(self):
+        no_decay = {'bias', 'LayerNorm.weight'}
+        return [param for name, param in self.named_parameters() if not any(nd in name for nd in no_decay)]
