@@ -94,10 +94,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
         with torch.cuda.amp.autocast():
-            outputs = model(img_left, img_right)
-            loss = criterion(outputs, targets)
+            outputs, mil_out = model(img_left, img_right)
+            loss1 = criterion(outputs, targets)
 
+            loss2 = criterion(mil_out, targets)
+
+            loss = 0.5 * loss1 + 0.5 * loss2
         loss_value = loss.item()
+        cls_loss_value = loss1.item()
+        mil_loss_value = loss2.item()
+        
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -122,11 +128,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=max_lr)
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
+        mil_loss_value_reduce = misc.all_reduce_mean(mil_loss_value)
+        cls_loss_value_reduce = misc.all_reduce_mean(cls_loss_value)
+
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
             """
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+            log_writer.add_scalar('mil loss', mil_loss_value_reduce,epoch_1000x)
+            log_writer.add_scalar('cls loss', cls_loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', max_lr, epoch_1000x)
 

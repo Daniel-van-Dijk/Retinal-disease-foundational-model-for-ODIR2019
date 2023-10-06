@@ -34,8 +34,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        for blk in self.blocks:
-            x = blk(x)
+        x_patch = x[:,1:,:]
+        x_patch = self.fc_norm(x_patch)
 
         if self.global_pool:
             x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
@@ -44,7 +44,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             x = self.norm(x)
             outcome = x[:, 0]
 
-        return outcome
+        return outcome, x_patch
 
 
 def vit_large_patch16(**kwargs):

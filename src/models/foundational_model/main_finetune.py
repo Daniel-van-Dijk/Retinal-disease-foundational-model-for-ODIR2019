@@ -23,6 +23,7 @@ from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
+from collections import OrderedDict
 
 import util.lr_decay as lrd
 import util.misc as misc
@@ -125,7 +126,7 @@ def get_args_parser():
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
@@ -174,16 +175,16 @@ def main(args):
     # dataset_test = build_dataset(is_train='test', args=args)
 
     # can use read_csv now for balanced_df in stead of read_excel
-    df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
+    df = pd.read_csv('/home/scur0549/ODIR2019/balanced_df.csv')
     df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     splitter = GroupShuffleSplit(test_size=.15, n_splits=2, random_state = 42)
-    split = splitter.split(df, groups=df['id'])
+    split = splitter.split(df, groups=df['ID'])
     train_inds, test_inds = next(split)
 
     train_df = df.iloc[train_inds]
     validation_df = df.iloc[test_inds]
-    dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
-    dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
+    dataset_train = ODIRDataset(train_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=True, args=args)
+    dataset_val = ODIRDataset(validation_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=False, args=args)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -315,22 +316,26 @@ def main(args):
     # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
-        print("Load pre-trained checkpoint from: %s" % args.finetune)
         
-        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
+
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint['model']:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint['model'][k]
-
         # Load pre-trained weights into the Vision Transformer model.
         # Note: Adaptation might be needed depending on checkpoint format.
         base_vit_model.load_state_dict(checkpoint['model'], strict=False)
+
 
     # Instantiate your custom model using the pre-trained Vision Transformer as a base.
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
     print('odir', model)
     
+
+
+
+
+
     # Move the model to the device (e.g., GPU).
     model.to(device)
 
