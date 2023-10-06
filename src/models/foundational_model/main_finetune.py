@@ -177,7 +177,7 @@ def main(args):
     df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
     df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     splitter = GroupShuffleSplit(test_size=.15, n_splits=2, random_state = 42)
-    split = splitter.split(df, groups=df['id'])
+    split = splitter.split(df, groups=df['ID'])
     train_inds, test_inds = next(split)
 
     train_df = df.iloc[train_inds]
