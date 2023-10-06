@@ -22,7 +22,7 @@ assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
 import util.lr_decay as lrd
 import util.misc as misc
@@ -176,7 +176,12 @@ def main(args):
     # can use read_csv now for balanced_df in stead of read_excel
     df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
     df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    train_df, validation_df = train_test_split(df, test_size=0.15, random_state=42)
+    splitter = GroupShuffleSplit(test_size=.15, n_splits=2, random_state = 42)
+    split = splitter.split(df, groups=df['id'])
+    train_inds, test_inds = next(split)
+
+    train_df = df.iloc[train_inds]
+    validation_df = df.iloc[test_inds]
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
     dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
 
