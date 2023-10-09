@@ -10,6 +10,7 @@ import numpy as np
 import os
 import time
 from pathlib import Path
+import pandas as pd
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -21,14 +22,16 @@ assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset
+from util.datasets import build_dataset, ODIRDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_vit
+from ODIR_model import ODIRmodel
 
 from engine_finetune import train_one_epoch, evaluate
 
@@ -115,7 +118,7 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument('--data_path', default='/home/jupyter/Mor_DR_data/data/data/IDRID/Disease_Grading/', type=str,
                         help='dataset path')
-    parser.add_argument('--nb_classes', default=1000, type=int,
+    parser.add_argument('--nb_classes', default=8, type=int,
                         help='number of the classification types')
 
     parser.add_argument('--output_dir', default='./output_dir',
@@ -166,9 +169,45 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = build_dataset(is_train='train', args=args)
-    dataset_val = build_dataset(is_train='val', args=args)
-    dataset_test = build_dataset(is_train='test', args=args)
+    # dataset_train = build_dataset(is_train='train', args=args)
+    # dataset_val = build_dataset(is_train='val', args=args)
+    # dataset_test = build_dataset(is_train='test', args=args)
+    disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
+    original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    print(original_df[disease_columns].sum() / len(original_df) * 100)
+    balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
+    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    
+    print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
+    # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
+    train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
+    
+    # Using original + augmented for training
+    train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+   
+    print(train_df[disease_columns].sum() / len(train_df) * 100)
+    print('---')
+
+    # Using only original samples for validation so no duplicates and no patient in train and val at the same time
+    validation_df = original_df[original_df['ID'].isin(val_ids)]
+    print(validation_df[disease_columns].sum() / len(validation_df) * 100)
+    print("train set length", len(train_df))
+    print("val set length", len(validation_df))
+    # splitter = GroupShuffleSplit(test_size=.2, n_splits=2, random_state = 42)
+    # split = splitter.split(balanced_df, groups=balanced_df['ID'])
+    # train_inds, val_inds = next(split)
+
+    # train_df = balanced_df.iloc[train_inds]
+    # validation_df = balanced_df.iloc[val_inds]
+    # print("val set length before dropping duplicates", len(validation_df))
+    # validation_df = validation_df.drop_duplicates()
+    # print(train_df[disease_columns].sum() / len(train_df) * 100)
+    # print(validation_df[disease_columns].sum() / len(validation_df) * 100)
+    # print("train set length", len(train_df))
+    # print("val set length after dropping duplicates", len(validation_df))
+    dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
+    dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -186,17 +225,7 @@ def main(args):
                 dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-            
-        if args.dist_eval:
-            if len(dataset_test) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_test = torch.utils.data.DistributedSampler(
-                dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        else:
-            sampler_test = torch.utils.data.SequentialSampler(dataset_test)
-            
+    
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -204,31 +233,25 @@ def main(args):
     else:
         log_writer = None
 
+
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
+        dataset_train, 
+        sampler=sampler_train, 
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=True,
+        drop_last=True
     )
 
     data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
+        dataset_val, 
+        sampler=sampler_val, 
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
     )
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False
-    )
-    
-    
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -238,37 +261,65 @@ def main(args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
     
-    model = models_vit.__dict__[args.model](
+    base_vit_model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         drop_path_rate=args.drop_path,
         global_pool=args.global_pool,
     )
 
+    # if args.finetune and not args.eval:
+    #     checkpoint = torch.load(args.finetune, map_location='cpu')
+
+    #     print("Load pre-trained checkpoint from: %s" % args.finetune)
+    #     checkpoint_model = checkpoint['model']
+    #     state_dict = model.state_dict()
+    #     for k in ['head.weight', 'head.bias']:
+    #         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+    #             print(f"Removing key {k} from pretrained checkpoint")
+    #             del checkpoint_model[k]
+
+    #     # interpolate position embedding
+    #     interpolate_pos_embed(model, checkpoint_model)
+
+    #     # load pre-trained model
+    #     msg = model.load_state_dict(checkpoint_model, strict=False)
+    #     print(msg)
+
+    #     if args.global_pool:
+    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+    #     else:
+    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+
+    #     # manually initialize fc layer
+    #     trunc_normal_(model.head.weight, std=2e-5)
+
+    # model.to(device)
+    # Instantiate a pre-trained Vision Transformer model.
+    base_vit_model = models_vit.__dict__[args.model](
+        num_classes=args.nb_classes,  # May not be necessary depending on your needs.
+        drop_path_rate=args.drop_path,
+        global_pool=args.global_pool,
+    )
+
+    # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
-
         print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
-        state_dict = model.state_dict()
+        
+        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
         for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            if k in checkpoint['model']:
                 print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+                del checkpoint['model'][k]
 
-        # interpolate position embedding
-        interpolate_pos_embed(model, checkpoint_model)
+        # Load pre-trained weights into the Vision Transformer model.
+        # Note: Adaptation might be needed depending on checkpoint format.
+        base_vit_model.load_state_dict(checkpoint['model'], strict=False)
 
-        # load pre-trained model
-        msg = model.load_state_dict(checkpoint_model, strict=False)
-        print(msg)
-
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
-
-        # manually initialize fc layer
-        trunc_normal_(model.head.weight, std=2e-5)
+    
+    model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
+    print('odir', model)
+    
 
     model.to(device)
 
@@ -301,26 +352,28 @@ def main(args):
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr)
     loss_scaler = NativeScaler()
 
-    if mixup_fn is not None:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    # if mixup_fn is not None:
+    #     # smoothing is handled with mixup label transform
+    #     criterion = SoftTargetCrossEntropy()
+    # elif args.smoothing > 0.:
+    #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+    # else:
+    criterion = torch.nn.BCEWithLogitsLoss()
+
 
     print("criterion = %s" % str(criterion))
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
     if args.eval:
-        test_stats,auc_roc = evaluate(data_loader_test, model, device, args.task, epoch=0, mode='test',num_class=args.nb_classes)
+        test_stats,auc_roc = evaluate(data_loader_val, model, device, args.task, epoch=0, mode='test',num_class=args.nb_classes)
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
     max_auc = 0.0
+    best_final_score = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -332,24 +385,33 @@ def main(args):
             args=args
         )
 
-        val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
-        if max_auc<val_auc_roc:
-            max_auc = val_auc_roc
+       
+        val_loss, final_score, kappa, f1, auc = evaluate(model, data_loader_val, device, criterion)
+    
+        # Log validation metrics
+        print(f"Validation Loss: {val_loss:.4f}, Final Score: {final_score:.4f}, Kappa: {kappa:.4f}, F1: {f1:.4f}, AUC: {auc:.4f}")
+        
+        # Check if this is the best model so far
+        if final_score > best_final_score:
+            best_final_score = final_score
             
             if args.output_dir:
-                misc.save_model(
-                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                    loss_scaler=loss_scaler, epoch=epoch)
+                # not sure how this works with distributed training so TODO
+                # misc.save_model(
+                #     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                #     loss_scaler=loss_scaler, epoch=epoch)
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_final_score': best_final_score,
+                    # ... any other states you wish to save ...
+                }
+                checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+                torch.save(checkpoint, checkpoint_path)
+                print("Model checkpoint saved at", checkpoint_path)
         
 
-        if epoch==(args.epochs-1):
-            test_stats,auc_roc = evaluate(data_loader_test, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
-
-        
-        if log_writer is not None:
-            log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
-            log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
-            log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
             
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
