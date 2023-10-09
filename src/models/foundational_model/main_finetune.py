@@ -219,17 +219,7 @@ def main(args):
                 dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-            
-        # if args.dist_eval:
-        #     if len(dataset_test) % num_tasks != 0:
-        #         print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-        #               'This will slightly alter validation results as extra duplicate entries are added to achieve '
-        #               'equal num of samples per-process.')
-        #     sampler_test = torch.utils.data.DistributedSampler(
-        #         dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        # else:
-        #     sampler_test = torch.utils.data.SequentialSampler(dataset_test)
-            
+    
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -256,31 +246,6 @@ def main(args):
         drop_last=False
     )
 
-    # data_loader_train = torch.utils.data.DataLoader(
-    #     dataset_train, sampler=sampler_train,
-    #     batch_size=args.batch_size,
-    #     num_workers=args.num_workers,
-    #     pin_memory=args.pin_mem,
-    #     drop_last=True,
-    # )
-
-    # data_loader_val = torch.utils.data.DataLoader(
-    #     dataset_val, sampler=sampler_val,
-    #     batch_size=args.batch_size,
-    #     num_workers=args.num_workers,
-    #     pin_memory=args.pin_mem,
-    #     drop_last=False
-    # )
-
-    # data_loader_test = torch.utils.data.DataLoader(
-    #     dataset_test, sampler=sampler_test,
-    #     batch_size=args.batch_size,
-    #     num_workers=args.num_workers,
-    #     pin_memory=args.pin_mem,
-    #     drop_last=False
-    # )
-    
-    
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -345,11 +310,11 @@ def main(args):
         # Note: Adaptation might be needed depending on checkpoint format.
         base_vit_model.load_state_dict(checkpoint['model'], strict=False)
 
-    # Instantiate your custom model using the pre-trained Vision Transformer as a base.
+    
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
     print('odir', model)
     
-    # Move the model to the device (e.g., GPU).
+
     model.to(device)
 
     model_without_ddp = model
@@ -414,7 +379,7 @@ def main(args):
             args=args
         )
 
-        # After training for one epoch, let's validate the model.
+       
         val_loss, final_score, kappa, f1, auc = evaluate(model, data_loader_val, device, criterion)
     
         # Log validation metrics
@@ -441,14 +406,6 @@ def main(args):
                 print("Model checkpoint saved at", checkpoint_path)
         
 
-        if epoch==(args.epochs-1):
-            test_stats,auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
-
-        
-        # if log_writer is not None:
-        #     log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
-        #     log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
-        #     log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
             
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
