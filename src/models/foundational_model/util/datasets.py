@@ -21,42 +21,6 @@ def build_dataset(is_train, args):
 
     return dataset
 
-
-# def build_transform(is_train, args):
-#     mean = IMAGENET_DEFAULT_MEAN
-#     std = IMAGENET_DEFAULT_STD
-#     # train transform
-#     if is_train=='train':
-#         # this should always dispatch to transforms_imagenet_train
-#         transform = create_transform(
-#             input_size=args.input_size,
-#             is_training=True,
-#             color_jitter=args.color_jitter,
-#             auto_augment=args.aa,
-#             interpolation='bicubic',
-#             re_prob=args.reprob,
-#             re_mode=args.remode,
-#             re_count=args.recount,
-#             mean=mean,
-#             std=std,
-#         )
-#         return transform
-
-#     # eval transform
-#     t = []
-#     if args.input_size <= 224:
-#         crop_pct = 224 / 256
-#     else:
-#         crop_pct = 1.0
-#     size = int(args.input_size / crop_pct)
-#     t.append(
-#         transforms.Resize(size, interpolation=transforms.InterpolationMode.BICUBIC), 
-#     )
-#     t.append(transforms.CenterCrop(args.input_size))
-#     t.append(transforms.ToTensor())
-#     t.append(transforms.Normalize(mean, std))
-#     return transforms.Compose(t)
-
 def build_transform(is_train, args):
     mean = IMAGENET_DEFAULT_MEAN
     std = IMAGENET_DEFAULT_STD
@@ -82,24 +46,6 @@ def build_transform(is_train, args):
     
     return transform
 
-def custom_transform(input_size, mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD, is_training=False):
-    if is_training:
-        # Define your training transforms here. E.g., resizing, normalization, and any other data augmentations.
-        transform = transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            transforms.RandomHorizontalFlip(),  # optional, if you want to include random horizontal flip in training
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-        ])
-    else:
-        # Define your evaluation transforms here. E.g., resizing and normalization.
-        transform = transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-        ])
-    
-    return transform
 
 class ODIRDataset(Dataset):
     def __init__(self, dataframe, img_dir, is_train, args):
