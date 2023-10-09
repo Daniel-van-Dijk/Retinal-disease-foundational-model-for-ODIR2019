@@ -172,32 +172,38 @@ def main(args):
     # dataset_train = build_dataset(is_train='train', args=args)
     # dataset_val = build_dataset(is_train='val', args=args)
     # dataset_test = build_dataset(is_train='test', args=args)
-
+    disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-
+    print(original_df[disease_columns].sum() / len(original_df) * 100)
     balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
     balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     
+    print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
     # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
     train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
-
+    
     # Using original + augmented for training
     train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+   
+    print(train_df[disease_columns].sum() / len(train_df) * 100)
+    print('---')
 
     # Using only original samples for validation so no duplicates and no patient in train and val at the same time
     validation_df = original_df[original_df['ID'].isin(val_ids)]
-    
+    print(validation_df[disease_columns].sum() / len(validation_df) * 100)
     print("train set length", len(train_df))
     print("val set length", len(validation_df))
     # splitter = GroupShuffleSplit(test_size=.2, n_splits=2, random_state = 42)
-    # split = splitter.split(df, groups=df['ID'])
+    # split = splitter.split(balanced_df, groups=balanced_df['ID'])
     # train_inds, val_inds = next(split)
 
-    # train_df = df.iloc[train_inds]
-    # validation_df = df.iloc[val_inds]
+    # train_df = balanced_df.iloc[train_inds]
+    # validation_df = balanced_df.iloc[val_inds]
     # print("val set length before dropping duplicates", len(validation_df))
     # validation_df = validation_df.drop_duplicates()
+    # print(train_df[disease_columns].sum() / len(train_df) * 100)
+    # print(validation_df[disease_columns].sum() / len(validation_df) * 100)
     # print("train set length", len(train_df))
     # print("val set length after dropping duplicates", len(validation_df))
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
