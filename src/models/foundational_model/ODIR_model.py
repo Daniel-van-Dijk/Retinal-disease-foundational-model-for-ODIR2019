@@ -52,11 +52,11 @@ class ODIRmodel(nn.Module):
     def forward(self, left_image, right_image):
         left_features, left_patch = self.base_vit_model(left_image)
         right_features, right_patch = self.base_vit_model(right_image)
-        print("SHAPE PATCH FEATURE",right_patch.shape)
+        # print("SHAPE PATCH FEATURE",right_patch.shape)
         combined_patch = torch.cat([left_patch, right_patch], dim=-1)
 
         combined_features = torch.cat([left_features, right_features], dim=-1)
-        print("COMBINED PATCH SHAPE", combined_patch.shape)
+        # print("COMBINED PATCH SHAPE", combined_patch.shape)
         output = self.classifier(combined_features)
 
         ## MIL PART
