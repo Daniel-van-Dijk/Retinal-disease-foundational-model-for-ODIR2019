@@ -169,9 +169,40 @@ def main(args):
 
     cudnn.benchmark = True
 
-    # dataset_train = build_dataset(is_train='train', args=args)
-    # dataset_val = build_dataset(is_train='val', args=args)
-    # dataset_test = build_dataset(is_train='test', args=args)
+    low_quality_files = [
+    "2174_right.jpg",
+    "2175_left.jpg",
+    "2176_left.jpg",
+    "2177_left.jpg",
+    "2177_right.jpg",
+    "2178_right.jpg",
+    "2179_left.jpg",
+    "2179_right.jpg",
+    "2180_left.jpg",
+    "2180_right.jpg",
+    "2181_left.jpg",
+    "2181_right.jpg",
+    "2182_left.jpg",
+    "2182_right.jpg",
+    "2957_left.jpg",
+    "2957_right.jpg",
+    "2340_lef.jpg",
+    "1706_left.jpg",
+    "1710_right.jpg",
+    "4522_left.jpg",
+    "1222_right.jpg", 
+    "1260_left.jpg", 
+    "2133_right.jpg", 
+    "240_left.jpg",
+    "240_right.jpg",
+    "150_left.jpg", 
+    "150_right.jpg",
+    ]
+    # Manual found low quality: 2340 left, 1706_left, 1710_right, 4522_left, 1222_right, 1260_left
+    # 2133_right, 240_left, 240_right, 150_left, 150_right
+
+
+    
     disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
@@ -180,11 +211,23 @@ def main(args):
     balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     
     print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
+
+    
+    valid_rows = []
+    for idx, row in original_df.iterrows():
+        left_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Left-Fundus'])
+        right_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Right-Fundus'])
+
+        if left_img_name not in low_quality_files and right_img_name not in low_quality_files:
+            valid_rows.append(row)
+    original_df = pd.DataFrame(valid_rows)
+    
     # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
     train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
     
     # Using original + augmented for training
-    train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+    # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+    train_df = original_df[original_df['ID'].isin(train_ids)]
    
     print(train_df[disease_columns].sum() / len(train_df) * 100)
     print('---')
@@ -323,6 +366,13 @@ def main(args):
 
     model.to(device)
 
+    for param in model.base_vit_model.parameters():
+        param.requires_grad = False
+
+    for i, block in enumerate(model.base_vit_model.blocks):
+        for param in block.parameters():
+            param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
+
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -358,7 +408,15 @@ def main(args):
     # elif args.smoothing > 0.:
     #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     # else:
-    criterion = torch.nn.BCEWithLogitsLoss()
+
+    samples = original_df.shape[0]
+    df_diseases = original_df[disease_columns]
+    class_weights = list(samples / (8 * np.sum(df_diseases, axis=0)))
+    print(class_weights)
+    class_weights = torch.tensor(class_weights).to(device)
+
+    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+    # criterion = torch.nn.BCEWithLogitsLoss()
 
 
     print("criterion = %s" % str(criterion))
