@@ -5,7 +5,7 @@
 #SBATCH --job-name=predsJob
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
-#SBATCH --time=01:35:00
+#SBATCH --time=00:15:00
 #SBATCH --mem=48000M
 #SBATCH --output=slurm_output_%A.out
 

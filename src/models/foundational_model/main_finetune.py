@@ -253,15 +253,15 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
             
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        # if args.dist_eval:
+        #     if len(dataset_val) % num_tasks != 0:
+        #         print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+        #               'This will slightly alter validation results as extra duplicate entries are added to achieve '
+        #               'equal num of samples per-process.')
+        #     sampler_val = torch.utils.data.DistributedSampler(
+        #         dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
+        # else:
+        #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
             
 
     # if global_rank == 0 and args.log_dir is not None and not args.eval:
@@ -404,7 +404,7 @@ def main(args):
     print("effective batch size: %d" % eff_batch_size)
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=False)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
     # build optimizer with layer-wise lr decay (lrd)
