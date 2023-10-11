@@ -194,21 +194,32 @@ def main(args):
     )
 
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes)
+    model.to(device)
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    # Load pre-trained weights
-    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/output_dir/best_model_checkpoint.pth'
+    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/runs/extra_augment_classweighting.pth'
     checkpoint = torch.load(checkpoint_path, map_location=device) 
-    #print(checkpoint['model_state_dict'])
-    model.load_state_dict(checkpoint['model_state_dict'])
+    state_dict = checkpoint['model_state_dict']
+    model_sd_keys = set(model.state_dict().keys())
+    ckpt_sd_keys = set(state_dict.keys())
 
-    
+    missing_keys = model_sd_keys - ckpt_sd_keys
+    unexpected_keys = ckpt_sd_keys - model_sd_keys
+
+    print(f"Missing keys: {missing_keys}")
+    print(f"Unexpected keys: {unexpected_keys}")
+    #if any(k.startswith("module.") for k in state_dict.keys()):
+    #    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+
+    # Load the state_dict into the model
+    model.load_state_dict(state_dict)
+
     model.eval()
 
     # check logit_output param
-    save_predictions(model, test_loader, 'cuda', 'prob_predictions.csv', logit_output=True)
-    save_predictions(model, test_loader, 'cuda', 'logit_predictions.csv', logit_output=False)
+    save_predictions(model, test_loader, device, 'prob_predictions.csv', logit_output=True)
+    #save_predictions(model, test_loader, device, 'logit_predictions.csv', logit_output=False)
 
 
 def save_predictions(model, dataloader, device, output_file, logit_output=True):
@@ -220,7 +231,7 @@ def save_predictions(model, dataloader, device, output_file, logit_output=True):
 
 
     with torch.no_grad():
-        for (images_left, images_right, image_ids) in tqdm(dataloader):
+        for (images_left, images_right, image_ids) in dataloader:
             images_left, images_right = images_left.to(device), images_right.to(device)
 
             output = model(images_left, images_right)
