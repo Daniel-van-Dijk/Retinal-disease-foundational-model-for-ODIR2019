@@ -428,8 +428,8 @@ def main(args):
                 print("Model checkpoint saved at", checkpoint_path)
         
 
-        if epoch==(args.epochs-1):
-            test_stats,auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
+        # if epoch==(args.epochs-1):
+        #     test_stats,auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='test',num_class=args.nb_classes)
 
         
         # if log_writer is not None:
