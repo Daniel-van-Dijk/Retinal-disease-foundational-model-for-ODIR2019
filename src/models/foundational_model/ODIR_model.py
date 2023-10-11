@@ -9,8 +9,15 @@ class ODIRmodel(nn.Module):
     def __init__(self, base_vit_model: VisionTransformer, num_classes: int):
         super(ODIRmodel, self).__init__()
         self.base_vit_model = base_vit_model
-        self.classifier = nn.Linear(2048, num_classes)  # Concatenate two 1024-dim features
-        self.base_vit_model.head = nn.Identity()
+    # Concatenate two 1024-dim features
+        self.base_vit_model.head = torch.nn.Sequential(
+        nn.Linear(2048, 512) ,
+        nn.LayerNorm(512),
+        nn.GELU(),
+        nn.Linear(512, 128),
+        nn.LayerNorm(128),
+        nn.GELU(),
+        nn.Linear(128, 8)) 
         ##MIL PART
         self.L = 128 #self.dim//3
         self.D = 76 #self.dim//5
@@ -46,18 +53,18 @@ class ODIRmodel(nn.Module):
         self.MIL_classifier[0].apply(self._init_weights)
       
 
-
-        trunc_normal_(self.classifier.weight, std=2e-5)
+        self.base_vit_model.head.apply(self._init_weights)
+        # trunc_normal_(self.base_vit_model.head, std=2e-5)
 
     def forward(self, left_image, right_image):
-        left_features, left_patch = self.base_vit_model(left_image)
-        right_features, right_patch = self.base_vit_model(right_image)
-        # print("SHAPE PATCH FEATURE",right_patch.shape)
+        left_features, left_patch = self.base_vit_model.forward_features(left_image)
+        right_features, right_patch = self.base_vit_model.forward_features(right_image)
+       
         combined_patch = torch.cat([left_patch, right_patch], dim=-1)
 
         combined_features = torch.cat([left_features, right_features], dim=-1)
         # print("COMBINED PATCH SHAPE", combined_patch.shape)
-        output = self.classifier(combined_features)
+        output = self.base_vit_model.head(combined_features)
 
         ## MIL PART
         H = self.MIL_Prep(combined_patch)  #B*N*D -->  B*N*L
@@ -84,7 +91,7 @@ class ODIRmodel(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
+            trunc_normal_(m.weight, std=.00002)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):

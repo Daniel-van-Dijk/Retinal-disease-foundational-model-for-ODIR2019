@@ -170,19 +170,69 @@ def main(args):
 
     cudnn.benchmark = True
 
+    low_quality_files = [
+    "2174_right.jpg",
+    "2175_left.jpg",
+    "2176_left.jpg",
+    "2177_left.jpg",
+    "2177_right.jpg",
+    "2178_right.jpg",
+    "2179_left.jpg",
+    "2179_right.jpg",
+    "2180_left.jpg",
+    "2180_right.jpg",
+    "2181_left.jpg",
+    "2181_right.jpg",
+    "2182_left.jpg",
+    "2182_right.jpg",
+    "2957_left.jpg",
+    "2957_right.jpg",
+    "2340_lef.jpg",
+    "1706_left.jpg",
+    "1710_right.jpg",
+    "4522_left.jpg",
+    "1222_right.jpg", 
+    "1260_left.jpg", 
+    "2133_right.jpg", 
+    "240_left.jpg",
+    "240_right.jpg",
+    "150_left.jpg", 
+    "150_right.jpg",
+    ]
+
     # dataset_train = build_dataset(is_train='train', args=args)
     # dataset_val = build_dataset(is_train='val', args=args)
     # dataset_test = build_dataset(is_train='test', args=args)
 
-    # can use read_csv now for balanced_df in stead of read_excel
-    df = pd.read_csv('/home/scur0549/ODIR2019/balanced_df.csv')
-    df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    splitter = GroupShuffleSplit(test_size=.15, n_splits=2, random_state = 42)
-    split = splitter.split(df, groups=df['ID'])
-    train_inds, test_inds = next(split)
+     
+    disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
+    original_df = pd.read_excel('/home/scur0549/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx', engine = 'openpyxl')
+    original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    balanced_df = pd.read_csv('/home/scur0549/ODIR2019/src/balanced_df.csv')
+    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    
+    valid_rows = []
+    for idx, row in original_df.iterrows():
+        left_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Left-Fundus'])
+        right_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Right-Fundus'])
 
-    train_df = df.iloc[train_inds]
-    validation_df = df.iloc[test_inds]
+        if left_img_name not in low_quality_files and right_img_name not in low_quality_files:
+            valid_rows.append(row)
+    original_df = pd.DataFrame(valid_rows)
+    
+    # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
+    train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
+
+     
+    # Using original + augmented for training
+    train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+    # train_df = original_df[original_df['ID'].isin(train_ids)]
+   
+    print(train_df[disease_columns].sum() / len(train_df) * 100)
+
+    # Using only original samples for validation so no duplicates and no patient in train and val at the same time
+    validation_df = original_df[original_df['ID'].isin(val_ids)]
+
     dataset_train = ODIRDataset(train_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=True, args=args)
     dataset_val = ODIRDataset(validation_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=False, args=args)
 
@@ -203,22 +253,22 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
             
-        # if args.dist_eval:
-        #     if len(dataset_test) % num_tasks != 0:
-        #         print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-        #               'This will slightly alter validation results as extra duplicate entries are added to achieve '
-        #               'equal num of samples per-process.')
-        #     sampler_test = torch.utils.data.DistributedSampler(
-        #         dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        # else:
-        #     sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+        if args.dist_eval:
+            if len(dataset_val) % num_tasks != 0:
+                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
+                      'equal num of samples per-process.')
+            sampler_val = torch.utils.data.DistributedSampler(
+                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
+        else:
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
             
 
-    if global_rank == 0 and args.log_dir is not None and not args.eval:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir+args.task)
-    else:
-        log_writer = None
+    # if global_rank == 0 and args.log_dir is not None and not args.eval:
+        # os.makedirs(args.log_dir, exist_ok=True)
+        # log_writer = SummaryWriter(log_dir=args.log_dir+args.task)
+   
+    log_writer = None
 
 
     data_loader_train = torch.utils.data.DataLoader(
@@ -316,6 +366,7 @@ def main(args):
     # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
+        print("Load pre-trained checkpoint from: %s" % args.finetune)
         
 
         for k in ['head.weight', 'head.bias']:
@@ -329,12 +380,8 @@ def main(args):
 
     # Instantiate your custom model using the pre-trained Vision Transformer as a base.
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
-    print('odir', model)
+    # print('odir', model)
     
-
-
-
-
 
     # Move the model to the device (e.g., GPU).
     model.to(device)
@@ -357,7 +404,7 @@ def main(args):
     print("effective batch size: %d" % eff_batch_size)
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=False)
         model_without_ddp = model.module
 
     # build optimizer with layer-wise lr decay (lrd)
