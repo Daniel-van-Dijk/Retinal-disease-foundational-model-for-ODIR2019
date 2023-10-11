@@ -19,11 +19,28 @@ from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, average_pre
 from pycm import *
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn import metrics
 
 
-
+def focal_multilabel_loss(logits, targets, gamma=2):
+    """
+    Computes multilabel focal loss between logits and targets.
+    
+    Args:
+        logits (torch.Tensor): Raw logits from the model (shape: batch_size x num_classes).
+        targets (torch.Tensor): Binary target labels (shape: batch_size x num_classes).
+        gamma (float): Focusing parameter for modulating loss.
+        
+    Returns:
+        torch.Tensor: Computed multilabel focal loss.
+    """
+    l = logits.reshape(-1)
+    t = targets.reshape(-1)
+    p = torch.sigmoid(l)
+    p = torch.where(t >= 0.5, p, 1-p)
+    logp = - torch.log(torch.clamp(p, 1e-4, 1-1e-4))
+    loss = logp*((1-p)**gamma)
+    loss = num_label*loss.mean()
+    return loss
 
 def misc_measures(confusion_matrix):
     
@@ -81,21 +98,23 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
-    for data_iter_step, ((img_left, img_right), targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
-        img_left = img_left.to(device, non_blocking=True)
-        img_right = img_right.to(device, non_blocking=True)
+        samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
+
         with torch.cuda.amp.autocast():
-            outputs = model(img_left, img_right)
-            loss = criterion(outputs, targets)
+            outputs = model(samples)
+            #loss = criterion(outputs, targets)
+            loss = focal_multilabel_loss(outputs, targets)
+
 
         loss_value = loss.item()
 
@@ -136,10 +155,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-
-
 @torch.no_grad()
-def evaluate_old(data_loader, model, device, task, epoch, mode, num_class):
+def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -166,7 +183,8 @@ def evaluate_old(data_loader, model, device, task, epoch, mode, num_class):
         # compute output
         with torch.cuda.amp.autocast():
             output = model(images)
-            loss = criterion(output, target)
+            #loss = criterion(output, target)
+            loss = focal_multilabel_loss(output, target)
             prediction_softmax = nn.Softmax(dim=1)(output)
             _,prediction_decode = torch.max(prediction_softmax, 1)
             _,true_label_decode = torch.max(true_label, 1)
@@ -186,6 +204,7 @@ def evaluate_old(data_loader, model, device, task, epoch, mode, num_class):
     prediction_decode_list = np.array(prediction_decode_list)
     confusion_matrix = multilabel_confusion_matrix(true_label_decode_list, prediction_decode_list,labels=[i for i in range(num_class)])
     acc, sensitivity, specificity, precision, G, F1, mcc = misc_measures(confusion_matrix)
+
     
     auc_roc = roc_auc_score(true_label_onehot_list, prediction_list,multi_class='ovr',average='macro')
     auc_pr = average_precision_score(true_label_onehot_list, prediction_list,average='macro')          
@@ -208,43 +227,3 @@ def evaluate_old(data_loader, model, device, task, epoch, mode, num_class):
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()},auc_roc
 
-
-
-
-#calculate kappa, F-1 socre and AUC value
-def ODIR_Metrics(gt_data, pr_data):
-    """ function from ODIR2019 challenge """
-    th = 0.5
-    gt = gt_data.flatten()
-    pr = pr_data.flatten()
-    kappa = metrics.cohen_kappa_score(gt, pr>th)
-    f1 = metrics.f1_score(gt, pr>th, average='micro')
-    auc = metrics.roc_auc_score(gt, pr)
-    final_score = (kappa+f1+auc)/3.0
-    return kappa, f1, auc, final_score
-
-@torch.no_grad()
-def evaluate(model, dataloader, device, criterion):
-    model.eval()
-    all_labels = []
-    all_logits = []
-    val_loss = 0
-    with torch.no_grad():
-        for (images_left, images_right), labels in dataloader:
-            images_left, images_right = images_left.to(device), images_right.to(device)
-            labels = labels.to(device)
-
-            logits = model(images_left, images_right)
-            loss = criterion(logits, labels)
-            val_loss += loss.item()
-            all_labels.append(labels.cpu().numpy())
-            all_logits.append(logits.cpu().numpy())
-
-    all_labels = np.vstack(all_labels)
-    all_logits = np.vstack(all_logits)
-
-    all_preds = (all_logits > 0.5).astype(np.float32)
-    # val_loss, average_score, kappa, f1, auc, val_confusion, val_accuracy
-    kappa, f1, auc, final_score = ODIR_Metrics(all_labels, all_preds)
-
-    return val_loss / len(dataloader), final_score, kappa, f1, auc
