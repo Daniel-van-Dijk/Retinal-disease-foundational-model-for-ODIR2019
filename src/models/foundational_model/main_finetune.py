@@ -22,19 +22,19 @@ assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
-from sklearn.model_selection import train_test_split, GroupShuffleSplit
+from sklearn.model_selection import train_test_split, GroupShuffleSplit, StratifiedKFold
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset, ODIRDataset
+from util.datasets import build_dataset, ODIRDataset, save_batch_images, TestDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-
+from util.asymmetric_loss import AsymmetricLossOptimized
 import models_vit
 from ODIR_model import ODIRmodel
-
+from generate_predictions_csv import save_predictions
 from engine_finetune import train_one_epoch, evaluate
-
+from torch.utils.data import Dataset, DataLoader
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
@@ -210,7 +210,7 @@ def main(args):
     balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
     balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     
-    print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
+    
 
     
     valid_rows = []
@@ -222,35 +222,16 @@ def main(args):
             valid_rows.append(row)
     original_df = pd.DataFrame(valid_rows)
     
-    # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
-    train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
-    
-    # Using original + augmented for training
-    # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
-    train_df = original_df[original_df['ID'].isin(train_ids)]
+
+    #skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
+    #print("train set length", len(train_df))
+    #print("val set length", len(validation_df))
+    train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=42)
    
-    print(train_df[disease_columns].sum() / len(train_df) * 100)
-    print('---')
-
-    # Using only original samples for validation so no duplicates and no patient in train and val at the same time
-    validation_df = original_df[original_df['ID'].isin(val_ids)]
-    print(validation_df[disease_columns].sum() / len(validation_df) * 100)
-    print("train set length", len(train_df))
-    print("val set length", len(validation_df))
-    # splitter = GroupShuffleSplit(test_size=.2, n_splits=2, random_state = 42)
-    # split = splitter.split(balanced_df, groups=balanced_df['ID'])
-    # train_inds, val_inds = next(split)
-
-    # train_df = balanced_df.iloc[train_inds]
-    # validation_df = balanced_df.iloc[val_inds]
-    # print("val set length before dropping duplicates", len(validation_df))
-    # validation_df = validation_df.drop_duplicates()
-    # print(train_df[disease_columns].sum() / len(train_df) * 100)
-    # print(validation_df[disease_columns].sum() / len(validation_df) * 100)
-    # print("train set length", len(train_df))
-    # print("val set length after dropping duplicates", len(validation_df))
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
     dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
+    
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -294,7 +275,7 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
-
+    save_batch_images(data_loader_train, num_images=8, filename="batch_visualization.png")
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -310,33 +291,7 @@ def main(args):
         global_pool=args.global_pool,
     )
 
-    # if args.finetune and not args.eval:
-    #     checkpoint = torch.load(args.finetune, map_location='cpu')
-
-    #     print("Load pre-trained checkpoint from: %s" % args.finetune)
-    #     checkpoint_model = checkpoint['model']
-    #     state_dict = model.state_dict()
-    #     for k in ['head.weight', 'head.bias']:
-    #         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-    #             print(f"Removing key {k} from pretrained checkpoint")
-    #             del checkpoint_model[k]
-
-    #     # interpolate position embedding
-    #     interpolate_pos_embed(model, checkpoint_model)
-
-    #     # load pre-trained model
-    #     msg = model.load_state_dict(checkpoint_model, strict=False)
-    #     print(msg)
-
-    #     if args.global_pool:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-    #     else:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
-
-    #     # manually initialize fc layer
-    #     trunc_normal_(model.head.weight, std=2e-5)
-
-    # model.to(device)
+   
     # Instantiate a pre-trained Vision Transformer model.
     base_vit_model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,  # May not be necessary depending on your needs.
@@ -366,12 +321,12 @@ def main(args):
 
     model.to(device)
 
-    for param in model.base_vit_model.parameters():
-        param.requires_grad = False
+    # for param in model.base_vit_model.parameters():
+    #     param.requires_grad = False
 
-    for i, block in enumerate(model.base_vit_model.blocks):
-        for param in block.parameters():
-            param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
+    # for i, block in enumerate(model.base_vit_model.blocks):
+    #     for param in block.parameters():
+    #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -415,9 +370,11 @@ def main(args):
     print(class_weights)
     class_weights = torch.tensor(class_weights).to(device)
 
-    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+    #criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
     # criterion = torch.nn.BCEWithLogitsLoss()
-
+    # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
+    # use link above to adjust aysmmetric loss to focal loss 
+    criterion = AsymmetricLossOptimized()
 
     print("criterion = %s" % str(criterion))
 
@@ -463,7 +420,6 @@ def main(args):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'best_final_score': best_final_score,
-                    # ... any other states you wish to save ...
                 }
                 checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
                 torch.save(checkpoint, checkpoint_path)
@@ -485,6 +441,14 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    from generate_predictions_csv import save_predictions
+    checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    output_path = os.path.join(args.output_dir, 'prob_predictions.csv')
+    save_predictions(model, test_loader, device, output_path, logit_output=True)
 
 
 if __name__ == '__main__':
