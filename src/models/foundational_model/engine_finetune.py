@@ -96,15 +96,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         with torch.cuda.amp.autocast():
             #error on how not all variables are used for loss calculation, while clearly it is...
             # related  to DDP
-            outputs, mil_out = model(img_left, img_right)
+            outputs = model(img_left, img_right)
             loss1 = criterion(outputs, targets)
 
-            loss2 = criterion(mil_out, targets)
+            # loss2 = criterion(mil_out, targets)
 
-            loss = 0.5 * loss1 + 0.5 * loss2
+            loss = loss1# + 0.2 * loss2
         loss_value = loss.item()
         cls_loss_value = loss1.item()
-        mil_loss_value = loss2.item()
+        # mil_loss_value = loss2.item()
         
 
         if not math.isfinite(loss_value):
@@ -130,22 +130,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=max_lr)
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
-        mil_loss_value_reduce = misc.all_reduce_mean(mil_loss_value)
+        # mil_loss_value_reduce = misc.all_reduce_mean(mil_loss_value)
         cls_loss_value_reduce = misc.all_reduce_mean(cls_loss_value)
 
-        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
-            """ We use epoch_1000x as the x-axis in tensorboard.
-            This calibrates different curves when batch size changes.
-            """
-            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-            log_writer.add_scalar('mil loss', mil_loss_value_reduce,epoch_1000x)
-            log_writer.add_scalar('cls loss', cls_loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('lr', max_lr, epoch_1000x)
+        # if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+        #     """ We use epoch_1000x as the x-axis in tensorboard.
+        #     This calibrates different curves when batch size changes.
+        #     """
+        #     epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+        #     log_writer.add_scalar('mil loss', mil_loss_value_reduce,epoch_1000x)
+        #     log_writer.add_scalar('cls loss', cls_loss_value_reduce, epoch_1000x)
+        #     log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
+        #     log_writer.add_scalar('lr', max_lr, epoch_1000x)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    print("Averaged stats:", metric_logger)#, " MIL_loss:",mil_loss_value, " CLS_loss", cls_loss_value)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
