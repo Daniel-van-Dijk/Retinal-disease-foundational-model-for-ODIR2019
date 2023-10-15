@@ -13,8 +13,6 @@ def param_groups_lrd(model, weight_decay=0.05, no_weight_decay_list=[], layer_de
     """
     param_group_names = {}
     param_groups = {}
-    # add + 2 here in stead of + 1 since we have identity + new classifier
-    #need to adjust for extended classifier head and MIL head.
     num_layers = len(model.base_vit_model.blocks) + 1
 
     layer_scales = list(layer_decay ** (num_layers - i) for i in range(num_layers + 1))
@@ -56,11 +54,13 @@ def param_groups_lrd(model, weight_decay=0.05, no_weight_decay_list=[], layer_de
     return list(param_groups.values())
 
 
+
 def get_layer_id_for_vit(name, num_layers):
     """
     Assign a parameter with its layer id
     Following BEiT: https://github.com/microsoft/unilm/blob/master/beit/optim_factory.py#L33
     """
+    print(name)
     if name in ['base_vit_model.cls_token', 'base_vit_model.pos_embed']:
         return 0
     elif name.startswith('base_vit_model.patch_embed'):
@@ -70,4 +70,4 @@ def get_layer_id_for_vit(name, num_layers):
     # elif name.startswith('classifier'):
     #     return num_layers
     else:
-        return num_layers # for classifier, and MIL just sets the decay to 1. So none.
+        return num_layers

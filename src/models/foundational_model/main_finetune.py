@@ -27,15 +27,15 @@ from collections import OrderedDict
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset, ODIRDataset
+from util.datasets import build_dataset, ODIRDataset, save_batch_images, TestDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-
+from util.asymmetric_loss import AsymmetricLossOptimized
 import models_vit
 from ODIR_model import ODIRmodel
-
+from generate_predictions_csv import save_predictions
 from engine_finetune import train_one_epoch, evaluate
-
+from torch.utils.data import Dataset, DataLoader
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
@@ -200,11 +200,40 @@ def main(args):
     "150_right.jpg",
     ]
 
-    # dataset_train = build_dataset(is_train='train', args=args)
-    # dataset_val = build_dataset(is_train='val', args=args)
-    # dataset_test = build_dataset(is_train='test', args=args)
+    low_quality_files = [
+    "2174_right.jpg",
+    "2175_left.jpg",
+    "2176_left.jpg",
+    "2177_left.jpg",
+    "2177_right.jpg",
+    "2178_right.jpg",
+    "2179_left.jpg",
+    "2179_right.jpg",
+    "2180_left.jpg",
+    "2180_right.jpg",
+    "2181_left.jpg",
+    "2181_right.jpg",
+    "2182_left.jpg",
+    "2182_right.jpg",
+    "2957_left.jpg",
+    "2957_right.jpg",
+    "2340_lef.jpg",
+    "1706_left.jpg",
+    "1710_right.jpg",
+    "4522_left.jpg",
+    "1222_right.jpg", 
+    "1260_left.jpg", 
+    "2133_right.jpg", 
+    "240_left.jpg",
+    "240_right.jpg",
+    "150_left.jpg", 
+    "150_right.jpg",
+    ]
+    # Manual found low quality: 2340 left, 1706_left, 1710_right, 4522_left, 1222_right, 1260_left
+    # 2133_right, 240_left, 240_right, 150_left, 150_right
 
-     
+
+    
     disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
     original_df = pd.read_excel('/home/scur0549/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx', engine = 'openpyxl')
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
@@ -278,7 +307,7 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
-
+    save_batch_images(data_loader_train, num_images=8, filename="batch_visualization.png")
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -294,33 +323,7 @@ def main(args):
         global_pool=args.global_pool,
     )
 
-    # if args.finetune and not args.eval:
-    #     checkpoint = torch.load(args.finetune, map_location='cpu')
-
-    #     print("Load pre-trained checkpoint from: %s" % args.finetune)
-    #     checkpoint_model = checkpoint['model']
-    #     state_dict = model.state_dict()
-    #     for k in ['head.weight', 'head.bias']:
-    #         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-    #             print(f"Removing key {k} from pretrained checkpoint")
-    #             del checkpoint_model[k]
-
-    #     # interpolate position embedding
-    #     interpolate_pos_embed(model, checkpoint_model)
-
-    #     # load pre-trained model
-    #     msg = model.load_state_dict(checkpoint_model, strict=False)
-    #     print(msg)
-
-    #     if args.global_pool:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-    #     else:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
-
-    #     # manually initialize fc layer
-    #     trunc_normal_(model.head.weight, std=2e-5)
-
-    # model.to(device)
+   
     # Instantiate a pre-trained Vision Transformer model.
     base_vit_model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,  # May not be necessary depending on your needs.
@@ -350,6 +353,13 @@ def main(args):
 
     # Move the model to the device (e.g., GPU).
     model.to(device)
+
+    # for param in model.base_vit_model.parameters():
+    #     param.requires_grad = False
+
+    # for i, block in enumerate(model.base_vit_model.blocks):
+    #     for param in block.parameters():
+    #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -386,8 +396,18 @@ def main(args):
     # elif args.smoothing > 0.:
     #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     # else:
-    criterion = torch.nn.BCEWithLogitsLoss()
 
+    samples = original_df.shape[0]
+    df_diseases = original_df[disease_columns]
+    class_weights = list(samples / (8 * np.sum(df_diseases, axis=0)))
+    print(class_weights)
+    class_weights = torch.tensor(class_weights).to(device)
+
+    #criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+    # criterion = torch.nn.BCEWithLogitsLoss()
+    # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
+    # use link above to adjust aysmmetric loss to focal loss 
+    criterion = AsymmetricLossOptimized()
 
     print("criterion = %s" % str(criterion))
 
@@ -433,7 +453,6 @@ def main(args):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'best_final_score': best_final_score,
-                    # ... any other states you wish to save ...
                 }
                 checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
                 torch.save(checkpoint, checkpoint_path)
@@ -455,6 +474,14 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    from generate_predictions_csv import save_predictions
+    checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    output_path = os.path.join(args.output_dir, 'prob_predictions.csv')
+    save_predictions(model, test_loader, device, output_path, logit_output=True)
 
 
 if __name__ == '__main__':
