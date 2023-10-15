@@ -11,7 +11,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
 
 def build_dataset(is_train, args):
     
@@ -21,39 +22,40 @@ def build_dataset(is_train, args):
 
     return dataset
 
-def build_transform(is_train, args):
+def paired_transform(is_train, args):
     mean = IMAGENET_DEFAULT_MEAN
     std = IMAGENET_DEFAULT_STD
-    # train transform
+
+    # Train transform
     if is_train == 'train':
-        transform = transforms.Compose([
+        basic_transforms = [
             transforms.Resize((args.input_size, args.input_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ]
+        
+        random_transforms = [
             transforms.RandomHorizontalFlip(),
             transforms.RandomRotation(degrees=15),
-            transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
-            transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
+            # transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
+            # transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-            transforms.RandomApply([transforms.Grayscale(num_output_channels=3)], p=0.25),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-    ])
-    else:
+        ]
         
-        transform = transforms.Compose([
+        return random_transforms, basic_transforms
+    else:
+        return None, [
             transforms.Resize((args.input_size, args.input_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean, std)
-        ])
-    
-    return transform
-
+        ]
 
 class ODIRDataset(Dataset):
     def __init__(self, dataframe, img_dir, is_train, args):
         self.dataframe = dataframe
         self.img_dir = img_dir
         self.is_train = is_train
-        self.transforms = build_transform(is_train, args)
+        self.random_transforms, self.basic_transforms = paired_transform(is_train, args)
 
     def __len__(self):
         return len(self.dataframe)
@@ -68,11 +70,73 @@ class ODIRDataset(Dataset):
         values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
         labels = torch.tensor(values)
 
-        if self.transforms:
-            left_image = self.transforms(left_image)
-            right_image = self.transforms(right_image)
+        seed = torch.randint(0, 2**32, (1,)).item()
+
+        if self.random_transforms:
+            random_transform = transforms.Compose(self.random_transforms)
+            torch.manual_seed(seed)  
+            left_image = random_transform(left_image)
+            torch.manual_seed(seed)  
+            right_image = random_transform(right_image)
+
+        basic_transform = transforms.Compose(self.basic_transforms)
+        left_image = basic_transform(left_image)
+        right_image = basic_transform(right_image)
 
         return (left_image, right_image), labels
+
+
+# def build_transform(is_train, args):
+#     mean = IMAGENET_DEFAULT_MEAN
+#     std = IMAGENET_DEFAULT_STD
+#     # train transform
+#     if is_train == 'train':
+#         transform = transforms.Compose([
+#             transforms.Resize((args.input_size, args.input_size)),
+#             transforms.RandomHorizontalFlip(),
+#             transforms.RandomRotation(degrees=15),
+#             #transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
+#             #transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
+#             #transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean, std)
+#     ])
+#     else:
+        
+#         transform = transforms.Compose([
+#             transforms.Resize((args.input_size, args.input_size)),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean, std)
+#         ])
+    
+#     return transform
+
+
+# class ODIRDataset(Dataset):
+#     def __init__(self, dataframe, img_dir, is_train, args):
+#         self.dataframe = dataframe
+#         self.img_dir = img_dir
+#         self.is_train = is_train
+#         self.transforms = build_transform(is_train, args)
+
+#     def __len__(self):
+#         return len(self.dataframe)
+
+#     def __getitem__(self, idx):
+#         left_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
+#         right_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
+
+#         left_image = Image.open(left_img_name)
+#         right_image = Image.open(right_img_name)
+
+#         values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
+#         labels = torch.tensor(values)
+
+#         if self.transforms:
+#             left_image = self.transforms(left_image)
+#             right_image = self.transforms(right_image)
+
+#         return (left_image, right_image), labels
     
 
 class TestDataset(Dataset):
@@ -98,3 +162,16 @@ class TestDataset(Dataset):
             right_image = self.transform(right_image)
 
         return left_image, right_image, image_id
+
+def save_batch_images(dataloader, num_images=8, filename="batch_visualization.png"):
+    data_iter = iter(dataloader)
+    (left_images, right_images), labels = next(data_iter)  
+    concatenated_images = torch.cat((left_images, right_images), 0)[:2*num_images] 
+    print(left_images.shape, right_images.shape)
+    plt.figure(figsize=(15, 7))
+    plt.axis("off")
+    plt.title("Training Images")
+    plt.imshow(np.transpose(vutils.make_grid(concatenated_images, padding=2, normalize=True).cpu(), (1, 2, 0)))
+    
+    plt.savefig(filename, bbox_inches='tight')
+    plt.close()
