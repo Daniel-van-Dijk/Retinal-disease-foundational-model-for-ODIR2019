@@ -221,6 +221,13 @@ def ODIR_Metrics(gt_data, pr_data):
     f1 = metrics.f1_score(gt, pr>th, average='micro')
     auc = metrics.roc_auc_score(gt, pr)
     final_score = (kappa+f1+auc)/3.0
+
+    precisions = metrics.precision_score(gt_data, pr_data, average=None)
+    recalls = metrics.recall_score(gt_data, pr_data, average=None)
+    classes_f1 = metrics.f1_score(gt_data, pr_data, average=None)
+    for class_index in range(len(precisions)):
+        print(f'Class {class_index + 1}: F1 = {classes_f1[class_index]}, Precision = {precisions[class_index]}, Recall = {recalls[class_index]}')
+
     return kappa, f1, auc, final_score
 
 @torch.no_grad()

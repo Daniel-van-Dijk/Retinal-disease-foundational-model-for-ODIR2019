@@ -16,3 +16,4 @@ tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.0
 timm==0.3.2
 tqdm==4.62.1
+xlrd==1.1.0
