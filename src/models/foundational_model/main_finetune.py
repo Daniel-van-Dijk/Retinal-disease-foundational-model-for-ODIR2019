@@ -227,8 +227,21 @@ def main(args):
     #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
     #print("train set length", len(train_df))
     #print("val set length", len(validation_df))
-    train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=42)
+    datasetseed = 21
+    train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=datasetseed)
+    #print("dataset seed", datasetseed)
+    #train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
+    
+    # Using original + augmented for training
+    # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+    #train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
    
+    print(train_df[disease_columns].sum() / len(train_df) * 100)
+    print('---')
+
+    # Using only original samples for validation so no duplicates and no patient in train and val at the same time
+    #validation_df = original_df[original_df['ID'].isin(val_ids)]
+
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
     dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
     
@@ -324,9 +337,12 @@ def main(args):
     # for param in model.base_vit_model.parameters():
     #     param.requires_grad = False
 
+    # for param in model.base_vit_model.head.parameters():
+    #     param.requires_grad = True
+    
     # for i, block in enumerate(model.base_vit_model.blocks):
     #     for param in block.parameters():
-    #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
+    #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 1)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -374,7 +390,7 @@ def main(args):
     # criterion = torch.nn.BCEWithLogitsLoss()
     # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
     # use link above to adjust aysmmetric loss to focal loss 
-    criterion = AsymmetricLossOptimized()
+    criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0)
 
     print("criterion = %s" % str(criterion))
 
@@ -389,6 +405,7 @@ def main(args):
     max_accuracy = 0.0
     max_auc = 0.0
     best_final_score = 0.0
+    best_val_loss = np.inf
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -407,9 +424,10 @@ def main(args):
         print(f"Validation Loss: {val_loss:.4f}, Final Score: {final_score:.4f}, Kappa: {kappa:.4f}, F1: {f1:.4f}, AUC: {auc:.4f}")
         
         # Check if this is the best model so far
-        if final_score > best_final_score:
-            best_final_score = final_score
-            
+        # if final_score > best_final_score:
+        #     best_final_score = final_score
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             if args.output_dir:
                 # not sure how this works with distributed training so TODO
                 # misc.save_model(
@@ -419,7 +437,7 @@ def main(args):
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'best_final_score': best_final_score,
+                    'best_final_score': best_val_loss,
                 }
                 checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
                 torch.save(checkpoint, checkpoint_path)

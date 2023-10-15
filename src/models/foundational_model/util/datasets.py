@@ -86,30 +86,30 @@ class ODIRDataset(Dataset):
         return (left_image, right_image), labels
 
 
-# def build_transform(is_train, args):
-#     mean = IMAGENET_DEFAULT_MEAN
-#     std = IMAGENET_DEFAULT_STD
-#     # train transform
-#     if is_train == 'train':
-#         transform = transforms.Compose([
-#             transforms.Resize((args.input_size, args.input_size)),
-#             transforms.RandomHorizontalFlip(),
-#             transforms.RandomRotation(degrees=15),
-#             #transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
-#             #transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
-#             #transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-#             transforms.ToTensor(),
-#             transforms.Normalize(mean, std)
-#     ])
-#     else:
+def build_transform(is_train, args):
+    mean = IMAGENET_DEFAULT_MEAN
+    std = IMAGENET_DEFAULT_STD
+    # train transform
+    if is_train == 'train':
+        transform = transforms.Compose([
+            transforms.Resize((args.input_size, args.input_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(degrees=15),
+            #transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
+            #transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
+            #transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+    ])
+    else:
         
-#         transform = transforms.Compose([
-#             transforms.Resize((args.input_size, args.input_size)),
-#             transforms.ToTensor(),
-#             transforms.Normalize(mean, std)
-#         ])
+        transform = transforms.Compose([
+            transforms.Resize((args.input_size, args.input_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ])
     
-#     return transform
+    return transform
 
 
 # class ODIRDataset(Dataset):
