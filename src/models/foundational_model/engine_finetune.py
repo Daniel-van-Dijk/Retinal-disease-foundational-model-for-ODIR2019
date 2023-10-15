@@ -97,13 +97,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             #error on how not all variables are used for loss calculation, while clearly it is...
             # related  to DDP
             outputs = model(img_left, img_right)
-            loss1 = criterion(outputs, targets)
+            loss = criterion(outputs, targets)
 
             # loss2 = criterion(mil_out, targets)
-
-            loss = loss1# + 0.2 * loss2
+            # loss = 0.5* loss1 + 0.5 * loss2
         loss_value = loss.item()
-        cls_loss_value = loss1.item()
+        # cls_loss_value = loss1.item()
         # mil_loss_value = loss2.item()
         
 
@@ -131,7 +130,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         # mil_loss_value_reduce = misc.all_reduce_mean(mil_loss_value)
-        cls_loss_value_reduce = misc.all_reduce_mean(cls_loss_value)
+        # cls_loss_value_reduce = misc.all_reduce_mean(cls_loss_value)
 
         # if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
         #     """ We use epoch_1000x as the x-axis in tensorboard.

@@ -9,15 +9,16 @@ class ODIRmodel(nn.Module):
     def __init__(self, base_vit_model: VisionTransformer, num_classes: int):
         super(ODIRmodel, self).__init__()
         self.base_vit_model = base_vit_model
+        self.base_vit_model.head = nn.Linear(2048, 8)
     # Concatenate two 1024-dim features
-        self.base_vit_model.head = torch.nn.Sequential(
-        nn.Linear(2048, 512) ,
-        nn.LayerNorm(512),
-        nn.GELU(),
-        nn.Linear(512, 128),
-        nn.LayerNorm(128),
-        nn.GELU(),
-        nn.Linear(128, 8)) 
+        # self.base_vit_model.head = torch.nn.Sequential(
+        # nn.Linear(2048, 512) ,
+        # nn.LayerNorm(512),
+        # nn.GELU(),
+        # nn.Linear(512, 128),
+        # nn.LayerNorm(128),
+        # nn.GELU(),
+        # nn.Linear(128, 8)) 
         ##MIL PART
         # self.L = 128 #self.dim//3
         # self.D = 76 #self.dim//5
@@ -53,8 +54,8 @@ class ODIRmodel(nn.Module):
         # self.MIL_classifier[0].apply(self._init_weights)
       
 
-        self.base_vit_model.head.apply(self._init_weights)
-        # trunc_normal_(self.base_vit_model.head, std=2e-5)
+        # self.base_vit_model.head.apply(self._init_weights)
+        trunc_normal_(self.base_vit_model.head.weight, std=2e-5)
 
     def forward(self, left_image, right_image):
         #Now it returns only features, but want patch information for MIL too

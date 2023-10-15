@@ -199,36 +199,6 @@ def main(args):
     "150_left.jpg", 
     "150_right.jpg",
     ]
-
-    low_quality_files = [
-    "2174_right.jpg",
-    "2175_left.jpg",
-    "2176_left.jpg",
-    "2177_left.jpg",
-    "2177_right.jpg",
-    "2178_right.jpg",
-    "2179_left.jpg",
-    "2179_right.jpg",
-    "2180_left.jpg",
-    "2180_right.jpg",
-    "2181_left.jpg",
-    "2181_right.jpg",
-    "2182_left.jpg",
-    "2182_right.jpg",
-    "2957_left.jpg",
-    "2957_right.jpg",
-    "2340_lef.jpg",
-    "1706_left.jpg",
-    "1710_right.jpg",
-    "4522_left.jpg",
-    "1222_right.jpg", 
-    "1260_left.jpg", 
-    "2133_right.jpg", 
-    "240_left.jpg",
-    "240_right.jpg",
-    "150_left.jpg", 
-    "150_right.jpg",
-    ]
     # Manual found low quality: 2340 left, 1706_left, 1710_right, 4522_left, 1222_right, 1260_left
     # 2133_right, 240_left, 240_right, 150_left, 150_right
 
@@ -250,20 +220,20 @@ def main(args):
     original_df = pd.DataFrame(valid_rows)
     
     # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
-    train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
+    train_df, val_df = train_test_split(original_df, test_size=0.2, random_state=42)
 
      
     # Using original + augmented for training
-    train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
+    # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
     # train_df = original_df[original_df['ID'].isin(train_ids)]
    
     print(train_df[disease_columns].sum() / len(train_df) * 100)
 
     # Using only original samples for validation so no duplicates and no patient in train and val at the same time
-    validation_df = original_df[original_df['ID'].isin(val_ids)]
+    # validation_df = original_df[original_df['ID'].isin(val_ids)]
 
     dataset_train = ODIRDataset(train_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=True, args=args)
-    dataset_val = ODIRDataset(validation_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=False, args=args)
+    dataset_val = ODIRDataset(val_df, '/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=False, args=args)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -407,7 +377,7 @@ def main(args):
     # criterion = torch.nn.BCEWithLogitsLoss()
     # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
     # use link above to adjust aysmmetric loss to focal loss 
-    criterion = AsymmetricLossOptimized()
+    criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0)
 
     print("criterion = %s" % str(criterion))
 
@@ -479,7 +449,7 @@ def main(args):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    test_loader = DataLoader(TestDataset('/home/scur0549/ODIR2019/data/cropped_ODIR-5K_Training_Images', is_train=False, args=args), batch_size=16, shuffle=False)
     output_path = os.path.join(args.output_dir, 'prob_predictions.csv')
     save_predictions(model, test_loader, device, output_path, logit_output=True)
 

@@ -60,7 +60,6 @@ def get_layer_id_for_vit(name, num_layers):
     Assign a parameter with its layer id
     Following BEiT: https://github.com/microsoft/unilm/blob/master/beit/optim_factory.py#L33
     """
-    print(name)
     if name in ['base_vit_model.cls_token', 'base_vit_model.pos_embed']:
         return 0
     elif name.startswith('base_vit_model.patch_embed'):
