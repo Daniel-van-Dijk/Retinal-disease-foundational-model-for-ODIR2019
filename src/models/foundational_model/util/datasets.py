@@ -125,9 +125,9 @@ class ODIRDataset(Dataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx):
-        if not pd.isna(row['Left-Fundus']):
+        if not pd.isna(self.dataframe.iloc[idx]['Left-Fundus']):
             img = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
-        if not pd.isna(row['Right-Fundus']):
+        if not pd.isna(self.dataframe.iloc[idx]['Right-Fundus']):
             img = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
 
         image = Image.open(img)
