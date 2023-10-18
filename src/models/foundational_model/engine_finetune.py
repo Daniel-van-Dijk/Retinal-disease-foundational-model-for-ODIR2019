@@ -81,20 +81,20 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
-    for data_iter_step, ((img_left, img_right), targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (img, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
-        img_left = img_left.to(device, non_blocking=True)
-        img_right = img_right.to(device, non_blocking=True)
+        #img_left = img_left.to(device, non_blocking=True)
+        img = img.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
         with torch.cuda.amp.autocast():
-            outputs = model(img_left, img_right)
+            outputs = model(img)
             loss = criterion(outputs, targets)
 
         loss_value = loss.item()
@@ -245,7 +245,7 @@ def evaluate(model, dataloader, device, criterion):
             loss = criterion(logits, labels)
             val_loss += loss.item()
             all_labels.append(labels.cpu().numpy())
-            all_logits.append(logits.cpu().numpy())
+            all_logits.append(logits.detach().cpu().numpy())
 
     all_labels = np.vstack(all_labels)
     all_logits = np.vstack(all_logits)

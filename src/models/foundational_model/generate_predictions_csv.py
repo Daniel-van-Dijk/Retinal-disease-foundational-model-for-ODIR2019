@@ -198,7 +198,7 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/runs/extra_augment_classweighting.pth'
+    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/run_4193859/best_score_checkpoint.pth'
     checkpoint = torch.load(checkpoint_path, map_location=device) 
     state_dict = checkpoint['model_state_dict']
     model_sd_keys = set(model.state_dict().keys())
@@ -218,7 +218,7 @@ def main(args):
     model.eval()
 
     # check logit_output param
-    save_predictions(model, test_loader, device, 'prob_predictions.csv', logit_output=True)
+    save_predictions(model, test_loader, device, 'prob_predictions_random.csv', logit_output=True)
     #save_predictions(model, test_loader, device, 'logit_predictions.csv', logit_output=False)
 
 

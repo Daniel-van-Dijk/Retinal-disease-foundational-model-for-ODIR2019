@@ -9,17 +9,26 @@ class ODIRmodel(nn.Module):
     def __init__(self, base_vit_model: VisionTransformer, num_classes: int):
         super(ODIRmodel, self).__init__()
         self.base_vit_model = base_vit_model
-        self.classifier = nn.Linear(2048, num_classes)  # Concatenate two 1024-dim features
-        self.base_vit_model.head = nn.Identity()
-        trunc_normal_(self.classifier.weight, std=2e-5)
+        # self.base_vit_model.head = torch.nn.Sequential(
+        #     nn.Linear(2048, 128),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=0.2),
+        #     nn.Linear(128, 8)) 
+        #self.base_vit_model.head = nn.Identity()
+        #trunc_normal_(self.classifier.weight, std=2e-5)
+        # trunc_normal_(self.base_vit_model.head[0].weight, std=2e-5)
+        # trunc_normal_(self.base_vit_model.head[3].weight, std=2e-5)
+        #trunc_normal_(self.base_vit_model.head[6].weight, std=2e-5)
+        self.base_vit_model.head = nn.Linear(1024, 8)
+        trunc_normal_(self.base_vit_model.head.weight, std=2e-5)
 
-    def forward(self, left_image, right_image):
-        left_features = self.base_vit_model(left_image)
-        right_features = self.base_vit_model(right_image)
+    def forward(self, image):
+        #left_features = self.base_vit_model.forward_features(left_image)
+        features = self.base_vit_model.forward_features(image)
         
-        combined_features = torch.cat([left_features, right_features], dim=-1)
+        #combined_features = torch.cat([left_features, right_features], dim=-1)
         
-        output = self.classifier(combined_features)
+        output = self.base_vit_model.head(features)
         return output
     
     def no_weight_decay(self):

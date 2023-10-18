@@ -22,19 +22,19 @@ assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
-from sklearn.model_selection import train_test_split, GroupShuffleSplit
+from sklearn.model_selection import train_test_split, GroupShuffleSplit, StratifiedKFold
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset, ODIRDataset
+from util.datasets import build_dataset, ODIRDataset, save_batch_images, TestDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-
+from util.asymmetric_loss import AsymmetricLossOptimized, AsymmetricLoss
 import models_vit
 from ODIR_model import ODIRmodel
-
+from generate_predictions_csv import save_predictions
 from engine_finetune import train_one_epoch, evaluate
-
+from torch.utils.data import Dataset, DataLoader
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
@@ -112,7 +112,7 @@ def get_args_parser():
                         help='finetune from checkpoint')
     parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=True)
-    parser.add_argument('--cls_token', action='store_false', dest='global_pool',
+    parser.add_argument('--cls_token', action='store_true', dest='global_pool',
                         help='Use class token instead of global pool for classification')
 
     # Dataset parameters
@@ -204,53 +204,60 @@ def main(args):
 
     
     disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
-    original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    # original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    # original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    
+    # print(original_df[disease_columns].sum() / len(original_df) * 100)
+    # balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
+    # balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    original_df = pd.read_csv("/home/scur0556/ODIR2019/data/expanded_sheet_annotations_fixed.csv")
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    print(original_df[disease_columns].sum() / len(original_df) * 100)
-    balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
-    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    
-    print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
 
-    
+    import math
+    print(len(original_df))
     valid_rows = []
     for idx, row in original_df.iterrows():
-        left_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Left-Fundus'])
-        right_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Right-Fundus'])
+        ##print(row['Right-Fundus'])
 
-        if left_img_name not in low_quality_files and right_img_name not in low_quality_files:
+
+
+        if not pd.isna(row['Left-Fundus']):
+            img = row['Left-Fundus']
+        else:
+            img = None
+        if not pd.isna(row['Right-Fundus']):
+            img = row['Right-Fundus']
+        else:
+            img = None
+
+        #print(left_img_name)
+        if img not in low_quality_files:
             valid_rows.append(row)
     original_df = pd.DataFrame(valid_rows)
-    
-    # Original split to ensure genuine validation as we don't want a balanced validation (not representative for test set)
-    train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
+    print(len(original_df))
+
+    #skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
+    #print("train set length", len(train_df))
+    #print("val set length", len(validation_df))
+    datasetseed = 21
+    train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=datasetseed)
+    #print("dataset seed", datasetseed)
+    #train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
     
     # Using original + augmented for training
     # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
-    train_df = original_df[original_df['ID'].isin(train_ids)]
+    #train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
    
     print(train_df[disease_columns].sum() / len(train_df) * 100)
     print('---')
 
     # Using only original samples for validation so no duplicates and no patient in train and val at the same time
-    validation_df = original_df[original_df['ID'].isin(val_ids)]
-    print(validation_df[disease_columns].sum() / len(validation_df) * 100)
-    print("train set length", len(train_df))
-    print("val set length", len(validation_df))
-    # splitter = GroupShuffleSplit(test_size=.2, n_splits=2, random_state = 42)
-    # split = splitter.split(balanced_df, groups=balanced_df['ID'])
-    # train_inds, val_inds = next(split)
+    #validation_df = original_df[original_df['ID'].isin(val_ids)]
 
-    # train_df = balanced_df.iloc[train_inds]
-    # validation_df = balanced_df.iloc[val_inds]
-    # print("val set length before dropping duplicates", len(validation_df))
-    # validation_df = validation_df.drop_duplicates()
-    # print(train_df[disease_columns].sum() / len(train_df) * 100)
-    # print(validation_df[disease_columns].sum() / len(validation_df) * 100)
-    # print("train set length", len(train_df))
-    # print("val set length after dropping duplicates", len(validation_df))
     dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
     dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
+    
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -294,7 +301,7 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
-
+    #save_batch_images(data_loader_train, num_images=8, filename="batch_visualization.png")
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -310,53 +317,15 @@ def main(args):
         global_pool=args.global_pool,
     )
 
-    # if args.finetune and not args.eval:
-    #     checkpoint = torch.load(args.finetune, map_location='cpu')
-
-    #     print("Load pre-trained checkpoint from: %s" % args.finetune)
-    #     checkpoint_model = checkpoint['model']
-    #     state_dict = model.state_dict()
-    #     for k in ['head.weight', 'head.bias']:
-    #         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-    #             print(f"Removing key {k} from pretrained checkpoint")
-    #             del checkpoint_model[k]
-
-    #     # interpolate position embedding
-    #     interpolate_pos_embed(model, checkpoint_model)
-
-    #     # load pre-trained model
-    #     msg = model.load_state_dict(checkpoint_model, strict=False)
-    #     print(msg)
-
-    #     if args.global_pool:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-    #     else:
-    #         assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
-
-    #     # manually initialize fc layer
-    #     trunc_normal_(model.head.weight, std=2e-5)
-
-    # model.to(device)
-    # Instantiate a pre-trained Vision Transformer model.
-    base_vit_model = models_vit.__dict__[args.model](
-        num_classes=args.nb_classes,  # May not be necessary depending on your needs.
-        drop_path_rate=args.drop_path,
-        global_pool=args.global_pool,
-    )
-
-    # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         
-        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint['model']:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint['model'][k]
 
-        # Load pre-trained weights into the Vision Transformer model.
-        # Note: Adaptation might be needed depending on checkpoint format.
         base_vit_model.load_state_dict(checkpoint['model'], strict=False)
 
     
@@ -366,12 +335,15 @@ def main(args):
 
     model.to(device)
 
-    for param in model.base_vit_model.parameters():
-        param.requires_grad = False
+    # for param in model.base_vit_model.parameters():
+    #     param.requires_grad = False
 
-    for i, block in enumerate(model.base_vit_model.blocks):
-        for param in block.parameters():
-            param.requires_grad = i >= (len(model.base_vit_model.blocks) - 2)
+    # for param in model.base_vit_model.head.parameters():
+    #     param.requires_grad = True
+    
+    # for i, block in enumerate(model.base_vit_model.blocks):
+    #     for param in block.parameters():
+    #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 1)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -415,9 +387,12 @@ def main(args):
     print(class_weights)
     class_weights = torch.tensor(class_weights).to(device)
 
-    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
-    # criterion = torch.nn.BCEWithLogitsLoss()
-
+    #criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+    #criterion = torch.nn.BCEWithLogitsLoss()
+    # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
+    # use link above to adjust aysmmetric loss to focal loss 
+    criterion = AsymmetricLoss(gamma_neg=2, gamma_pos=2, clip=0.05, eps=1e-4)
+    #criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=1, clip=0.05,disable_torch_grad_focal_loss=True)
 
     print("criterion = %s" % str(criterion))
 
@@ -432,6 +407,7 @@ def main(args):
     max_accuracy = 0.0
     max_auc = 0.0
     best_final_score = 0.0
+    best_val_loss = np.inf
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -452,7 +428,7 @@ def main(args):
         # Check if this is the best model so far
         if final_score > best_final_score:
             best_final_score = final_score
-            
+
             if args.output_dir:
                 # not sure how this works with distributed training so TODO
                 # misc.save_model(
@@ -463,9 +439,24 @@ def main(args):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'best_final_score': best_final_score,
-                    # ... any other states you wish to save ...
                 }
-                checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+                checkpoint_path = os.path.join(args.output_dir, 'best_score_checkpoint.pth')
+                torch.save(checkpoint, checkpoint_path)
+                print("Model checkpoint saved at", checkpoint_path)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            if args.output_dir:
+                # not sure how this works with distributed training so TODO
+                # misc.save_model(
+                #     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                #     loss_scaler=loss_scaler, epoch=epoch)
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_final_score': best_val_loss,
+                }
+                checkpoint_path = os.path.join(args.output_dir, 'best_loss_checkpoint.pth')
                 torch.save(checkpoint, checkpoint_path)
                 print("Model checkpoint saved at", checkpoint_path)
         
@@ -485,6 +476,22 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    from generate_predictions_csv import save_predictions
+    checkpoint_path = os.path.join(args.output_dir, 'best_score_checkpoint.pth')
+    checkpoint1 = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint1['model_state_dict'])
+    model.eval()
+    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    output_path = os.path.join(args.output_dir, 'prob_score_predictions.csv')
+    save_predictions(model, test_loader, device, output_path, logit_output=True)
+    del checkpoint1
+    checkpoint_path = os.path.join(args.output_dir, 'best_loss_checkpoint.pth')
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    output_path = os.path.join(args.output_dir, 'prob_loss_predictions.csv')
+    save_predictions(model, test_loader, device, output_path, logit_output=True)
 
 
 if __name__ == '__main__':
