@@ -238,7 +238,7 @@ def evaluate(model, dataloader, device, criterion):
             loss = criterion(logits, labels)
             val_loss += loss.item()
             all_labels.append(labels.cpu().numpy())
-            all_logits.append(logits.cpu().numpy())
+            all_logits.append(logits.detach().cpu().numpy())
 
     all_labels = np.vstack(all_labels)
     all_logits = np.vstack(all_logits)

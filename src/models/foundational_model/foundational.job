@@ -5,7 +5,7 @@
 #SBATCH --job-name=predsJob
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
-#SBATCH --time=00:59:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=48000M
 #SBATCH --output=slurm_output_%A.out
 
@@ -22,9 +22,10 @@ srun python -m torch.distributed.launch --nproc_per_node=1 --master_port=48798 m
     --batch_size 16 \
     --world_size 1 \
     --model vit_large_patch16 \
+    --cls_token \
     --epochs 50 \
-    --blr 5e-3 --layer_decay 0.65 \
-    --weight_decay 0.05 --drop_path 0.2 \
+    --blr 5e-4 --layer_decay 0.4 \
+    --weight_decay 0.1 --drop_path 0.2 \
     --nb_classes 8 \
     --output_dir ./run_${SLURM_JOB_ID}/ \
     --data_path /home/scur0556/ODIR2019/data \

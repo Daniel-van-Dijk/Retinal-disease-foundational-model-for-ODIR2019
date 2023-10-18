@@ -36,10 +36,11 @@ def paired_transform(is_train, args):
         
         random_transforms = [
             transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(degrees=15),
+            transforms.RandomRotation(degrees=(-15, 15)),
             # transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
-            # transforms.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            transforms.RandomResizedCrop(size=224, scale=(0.85, 1.15)),
+            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
         ]
         
         return random_transforms, basic_transforms

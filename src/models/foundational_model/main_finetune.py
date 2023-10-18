@@ -29,7 +29,7 @@ import util.misc as misc
 from util.datasets import build_dataset, ODIRDataset, save_batch_images, TestDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-from util.asymmetric_loss import AsymmetricLossOptimized
+from util.asymmetric_loss import AsymmetricLossOptimized, AsymmetricLoss
 import models_vit
 from ODIR_model import ODIRmodel
 from generate_predictions_csv import save_predictions
@@ -112,7 +112,7 @@ def get_args_parser():
                         help='finetune from checkpoint')
     parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=True)
-    parser.add_argument('--cls_token', action='store_false', dest='global_pool',
+    parser.add_argument('--cls_token', action='store_true', dest='global_pool',
                         help='Use class token instead of global pool for classification')
 
     # Dataset parameters
@@ -304,27 +304,15 @@ def main(args):
         global_pool=args.global_pool,
     )
 
-   
-    # Instantiate a pre-trained Vision Transformer model.
-    base_vit_model = models_vit.__dict__[args.model](
-        num_classes=args.nb_classes,  # May not be necessary depending on your needs.
-        drop_path_rate=args.drop_path,
-        global_pool=args.global_pool,
-    )
-
-    # Extract the model's weights for fine-tuning, if applicable.
     if args.finetune and not args.eval:
         checkpoint = torch.load(args.finetune, map_location='cpu')
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         
-        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint['model']:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint['model'][k]
 
-        # Load pre-trained weights into the Vision Transformer model.
-        # Note: Adaptation might be needed depending on checkpoint format.
         base_vit_model.load_state_dict(checkpoint['model'], strict=False)
 
     
@@ -387,10 +375,11 @@ def main(args):
     class_weights = torch.tensor(class_weights).to(device)
 
     #criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
-    # criterion = torch.nn.BCEWithLogitsLoss()
+    #criterion = torch.nn.BCEWithLogitsLoss()
     # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
     # use link above to adjust aysmmetric loss to focal loss 
-    criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0)
+    criterion = AsymmetricLoss(gamma_neg=2, gamma_pos=2, clip=0.05, eps=1e-4)
+    #criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=1, clip=0.05,disable_torch_grad_focal_loss=True)
 
     print("criterion = %s" % str(criterion))
 
@@ -424,8 +413,23 @@ def main(args):
         print(f"Validation Loss: {val_loss:.4f}, Final Score: {final_score:.4f}, Kappa: {kappa:.4f}, F1: {f1:.4f}, AUC: {auc:.4f}")
         
         # Check if this is the best model so far
-        # if final_score > best_final_score:
-        #     best_final_score = final_score
+        if final_score > best_final_score:
+            best_final_score = final_score
+
+            if args.output_dir:
+                # not sure how this works with distributed training so TODO
+                # misc.save_model(
+                #     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                #     loss_scaler=loss_scaler, epoch=epoch)
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_final_score': best_final_score,
+                }
+                checkpoint_path = os.path.join(args.output_dir, 'best_score_checkpoint.pth')
+                torch.save(checkpoint, checkpoint_path)
+                print("Model checkpoint saved at", checkpoint_path)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             if args.output_dir:
@@ -439,7 +443,7 @@ def main(args):
                     'optimizer_state_dict': optimizer.state_dict(),
                     'best_final_score': best_val_loss,
                 }
-                checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+                checkpoint_path = os.path.join(args.output_dir, 'best_loss_checkpoint.pth')
                 torch.save(checkpoint, checkpoint_path)
                 print("Model checkpoint saved at", checkpoint_path)
         
@@ -460,12 +464,20 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     from generate_predictions_csv import save_predictions
-    checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
+    checkpoint_path = os.path.join(args.output_dir, 'best_score_checkpoint.pth')
+    checkpoint1 = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint1['model_state_dict'])
+    model.eval()
+    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    output_path = os.path.join(args.output_dir, 'prob_score_predictions.csv')
+    save_predictions(model, test_loader, device, output_path, logit_output=True)
+    del checkpoint1
+    checkpoint_path = os.path.join(args.output_dir, 'best_loss_checkpoint.pth')
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
-    output_path = os.path.join(args.output_dir, 'prob_predictions.csv')
+    output_path = os.path.join(args.output_dir, 'prob_loss_predictions.csv')
     save_predictions(model, test_loader, device, output_path, logit_output=True)
 
 
