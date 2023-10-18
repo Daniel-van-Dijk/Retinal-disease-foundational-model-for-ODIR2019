@@ -13,6 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import torchvision.utils as vutils
+import pandas as pd
 
 def build_dataset(is_train, args):
     
@@ -124,18 +125,16 @@ class ODIRDataset(Dataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx):
-        left_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
-        right_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
-        if os.path.exists(left_img_name):
-            image = Image.open(left_img_name)
-        else:
-            image = Image.open(right_img_name)
+        if not pd.isna(row['Left-Fundus']):
+            img = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
+        if not pd.isna(row['Right-Fundus']):
+            img = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
 
+        image = Image.open(img)
         values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
         labels = torch.tensor(values)
 
         if self.transforms:
-            #left_image = self.transforms(left_image)
             image = self.transforms(image)
 
         return image, labels
