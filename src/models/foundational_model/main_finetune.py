@@ -204,24 +204,37 @@ def main(args):
 
     
     disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
-    original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    # original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+    # original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    
+    # print(original_df[disease_columns].sum() / len(original_df) * 100)
+    # balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
+    # balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    original_df = pd.read_csv("/home/scur0556/ODIR2019/data/expanded_sheet_annotations_fixed.csv")
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    print(original_df[disease_columns].sum() / len(original_df) * 100)
-    balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
-    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    
-    
 
-    
+    import math
+    print(len(original_df))
     valid_rows = []
     for idx, row in original_df.iterrows():
-        left_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Left-Fundus'])
-        right_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Right-Fundus'])
+        ##print(row['Right-Fundus'])
 
-        if left_img_name not in low_quality_files and right_img_name not in low_quality_files:
+
+
+        if not pd.isna(row['Left-Fundus']):
+            img = row['Left-Fundus']
+        else:
+            img = None
+        if not pd.isna(row['Right-Fundus']):
+            img = row['Right-Fundus']
+        else:
+            img = None
+
+        #print(left_img_name)
+        if img not in low_quality_files:
             valid_rows.append(row)
     original_df = pd.DataFrame(valid_rows)
-    
+    print(len(original_df))
 
     #skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
     #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
@@ -288,7 +301,7 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
-    save_batch_images(data_loader_train, num_images=8, filename="batch_visualization.png")
+    #save_batch_images(data_loader_train, num_images=8, filename="batch_visualization.png")
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:

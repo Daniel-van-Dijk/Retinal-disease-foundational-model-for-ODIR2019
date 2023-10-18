@@ -24,8 +24,8 @@ srun python -m torch.distributed.launch --nproc_per_node=1 --master_port=48798 m
     --model vit_large_patch16 \
     --cls_token \
     --epochs 50 \
-    --blr 5e-4 --layer_decay 0.4 \
-    --weight_decay 0.1 --drop_path 0.2 \
+    --blr 5e-3 --layer_decay 0.65 \
+    --weight_decay 0.05 --drop_path 0.2 \
     --nb_classes 8 \
     --output_dir ./run_${SLURM_JOB_ID}/ \
     --data_path /home/scur0556/ODIR2019/data \
