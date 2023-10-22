@@ -11,7 +11,7 @@ import os
 import time
 from pathlib import Path
 import pandas as pd
-
+import torch.nn as nn
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
@@ -240,8 +240,19 @@ def main(args):
     #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
     #print("train set length", len(train_df))
     #print("val set length", len(validation_df))
-    datasetseed = 21
-    train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=datasetseed)
+    #datasetseed = 21
+    #train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=datasetseed)
+
+    unique_ids = original_df['ID'].unique().tolist()
+    shuffled_ids = pd.Series(unique_ids).sample(frac=1, random_state=42).tolist()
+
+    train_size = int(0.8 * len(shuffled_ids))
+    train_patient_ids = shuffled_ids[:train_size]
+    val_patient_ids = shuffled_ids[train_size:]
+
+    train_df = original_df[original_df['ID'].isin(train_patient_ids)]
+    validation_df = original_df[original_df['ID'].isin(val_patient_ids)]
+
     #print("dataset seed", datasetseed)
     #train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
     
@@ -344,7 +355,21 @@ def main(args):
     # for i, block in enumerate(model.base_vit_model.blocks):
     #     for param in block.parameters():
     #         param.requires_grad = i >= (len(model.base_vit_model.blocks) - 1)
+    # for name, layer in model.named_modules():
+    #     if isinstance(layer, nn.Dropout):
+    #         layer.p = 0.3
 
+
+    #model.base_vit_model.blocks[20].mlp.drop.p = 0.5
+
+    model.base_vit_model.blocks[21].mlp.drop.p = 0.5
+
+    model.base_vit_model.blocks[22].mlp.drop.p = 0.5
+
+    model.base_vit_model.blocks[23].mlp.drop.p = 0.5
+
+    print("model with dropout")
+    print(model)
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -391,7 +416,7 @@ def main(args):
     #criterion = torch.nn.BCEWithLogitsLoss()
     # https://github.com/Alibaba-MIIL/ASL/issues/22#issuecomment-736721770
     # use link above to adjust aysmmetric loss to focal loss 
-    criterion = AsymmetricLoss(gamma_neg=2, gamma_pos=2, clip=0.05, eps=1e-4)
+    criterion = AsymmetricLoss(gamma_neg=2, gamma_pos=1, eps=1e-4)
     #criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=1, clip=0.05,disable_torch_grad_focal_loss=True)
 
     print("criterion = %s" % str(criterion))

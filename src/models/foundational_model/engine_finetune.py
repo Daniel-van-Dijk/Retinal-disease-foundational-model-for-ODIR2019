@@ -237,11 +237,11 @@ def evaluate(model, dataloader, device, criterion):
     all_logits = []
     val_loss = 0
     with torch.no_grad():
-        for (images_left, images_right), labels in dataloader:
-            images_left, images_right = images_left.to(device), images_right.to(device)
+        for (images, labels) in dataloader:
+            images = images.to(device)
             labels = labels.to(device)
 
-            logits = model(images_left, images_right)
+            logits = model(images)
             loss = criterion(logits, labels)
             val_loss += loss.item()
             all_labels.append(labels.cpu().numpy())
