@@ -114,6 +114,41 @@ def build_transform(is_train, args):
     return transform
 
 
+class Merge_valset(Dataset):
+    def __init__(self, dataframe, img_dir, is_train, args):
+        self.dataframe = dataframe
+        self.img_dir = img_dir
+        self.is_train = is_train
+        self.transforms = build_transform(is_train, args)
+
+    def __len__(self):
+        return len(self.dataframe) // 2 
+
+    def __getitem__(self, idx):
+        idx *= 2 
+
+        left_img_path = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
+        right_img_path = os.path.join(self.img_dir, self.dataframe.iloc[idx + 1]['Right-Fundus'])
+
+        left_image = Image.open(left_img_path)
+        right_image = Image.open(right_img_path)
+
+        left_labels = torch.tensor(self.dataframe.iloc[idx][5:].values.astype(np.float32))
+        right_labels = torch.tensor(self.dataframe.iloc[idx + 1][5:].values.astype(np.float32))
+        left_image_id = int(self.dataframe.iloc[idx]['Left-Fundus'].split('_')[0])
+        right_image_id = int(self.dataframe.iloc[idx + 1]['Right-Fundus'].split('_')[0])
+
+        assert left_image_id == right_image_id
+
+        if self.transforms:
+            left_image = self.transforms(left_image)
+            right_image = self.transforms(right_image)
+
+        return (left_image, right_image, left_image_id)
+
+
+
+
 class ODIRDataset(Dataset):
     def __init__(self, dataframe, img_dir, is_train, args):
         self.dataframe = dataframe
@@ -162,7 +197,9 @@ class TestDataset(Dataset):
             left_image = self.transform(left_image)
             right_image = self.transform(right_image)
 
-        return left_image, right_image, image_id
+        return (left_image, right_image, image_id)
+    
+
 
 def save_batch_images(dataloader, num_images=8, filename="batch_visualization.png"):
     data_iter = iter(dataloader)
