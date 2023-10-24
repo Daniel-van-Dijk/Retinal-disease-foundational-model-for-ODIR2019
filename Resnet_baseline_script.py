@@ -13,52 +13,77 @@ from tqdm.notebook import tqdm
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
-from torchvision.models import ResNet50_Weights
+import torchvision.models as models
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import csv
 import datetime
+from src.models.foundational_model.util.datasets import *
+from src.models.foundational_model.util.asymmetric_loss import *
+from collections import namedtuple
 
-class ODIRDataset(Dataset):
-    def __init__(self, dataframe, img_dir, transforms=None):
-        self.dataframe = dataframe
-        self.img_dir = img_dir
-        self.transforms = transforms
+low_quality_files = [
+"2174_right.jpg",
+"2175_left.jpg",
+"2176_left.jpg",
+"2177_left.jpg",
+"2177_right.jpg",
+"2178_right.jpg",
+"2179_left.jpg",
+"2179_right.jpg",
+"2180_left.jpg",
+"2180_right.jpg",
+"2181_left.jpg",
+"2181_right.jpg",
+"2182_left.jpg",
+"2182_right.jpg",
+"2957_left.jpg",
+"2957_right.jpg",
+"2340_lef.jpg",
+"1706_left.jpg",
+"1710_right.jpg",
+"4522_left.jpg",
+"1222_right.jpg", 
+"1260_left.jpg", 
+"2133_right.jpg", 
+"240_left.jpg",
+"240_right.jpg",
+"150_left.jpg", 
+"150_right.jpg",
+]
+# Manual found low quality: 2340 left, 1706_left, 1710_right, 4522_left, 1222_right, 1260_left
+# 2133_right, 240_left, 240_right, 150_left, 150_right
 
-    def __len__(self):
-        return len(self.dataframe)
-
-    def __getitem__(self, idx):
-        left_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
-        right_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
-
-        left_image = Image.open(left_img_name)
-        right_image = Image.open(right_img_name)
-
-        values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
-        labels = torch.tensor(values)
-
-        if self.transforms:
-            left_image = self.transforms(left_image)
-            right_image = self.transforms(right_image)
-
-        return (left_image, right_image), labels
-
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),])
-
-# put annotations in current directory
-df = pd.read_excel('data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
-df = df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
 
 
-train_df, validation_df = train_test_split(df, test_size=0.10, random_state=42)
+    
+disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
+original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
+original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
 
-train_dataset = ODIRDataset(train_df, 'data/cropped_ODIR-5K_Training_Dataset', transforms=transform)
-validation_dataset = ODIRDataset(validation_df, 'data/cropped_ODIR-5K_Training_Dataset', transforms=transform)
+low_quality_files_set = set(low_quality_files)
 
-train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-validation_dataloader = DataLoader(validation_dataset, batch_size=128, shuffle=False)
+
+original_df = original_df[~original_df['Left-Fundus'].isin(low_quality_files_set) & ~original_df['Right-Fundus'].isin(low_quality_files_set)]
+
+
+train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=42)
+
+
+Args = namedtuple('Args', ['input_size'])
+args = Args(input_size=224)
+
+dataset_train = ODIRDataset2eye(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
+dataset_val = ODIRDataset2eye(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
+
+
+train_dataloader = DataLoader(dataset_train, batch_size=64, shuffle=True)
+validation_dataloader = DataLoader(dataset_val, batch_size=64, shuffle=False)
+
+first_batch = next(iter(train_dataloader))
+
+# Checking the type and length of each element in the batch
+print(type(first_batch[0]), len(first_batch[0]))
+print(type(first_batch[1]), len(first_batch[1]))
 
 
 #calculate kappa, F1-score and AUC value
@@ -79,7 +104,7 @@ def evaluate(model, dataloader, device, criterion):
     all_logits = []
     val_loss = 0
     with torch.no_grad():
-        for (images_left, images_right), labels in tqdm(dataloader):
+        for (images_left, images_right), labels in dataloader:
             images_left, images_right = images_left.to(device), images_right.to(device)
             labels = labels.to(device)
 
@@ -87,7 +112,7 @@ def evaluate(model, dataloader, device, criterion):
             loss = criterion(logits, labels)
             val_loss += loss.item()
             all_labels.append(labels.cpu().numpy())
-            all_logits.append(logits.cpu().numpy())
+            all_logits.append(logits.detach().cpu().numpy())
 
     all_labels = np.vstack(all_labels)
     all_logits = np.vstack(all_logits)
@@ -101,54 +126,58 @@ def evaluate(model, dataloader, device, criterion):
 class ResNet_baseline(nn.Module):
     def __init__(self, num_diseases=8):
         super(ResNet_baseline, self).__init__()
-        self.resnet = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-        self.fc1 = nn.Linear(2 * 1000, 256)
-        self.fc2 = nn.Linear(256, num_diseases)
+        self.resnet = models.resnet18(pretrained=True)
+        self.resnet.fc = nn.Identity()
+        self.fc1 = nn.Linear(2 * 512, 8)
+        #self.fc2 = nn.Linear(256, num_diseases)
 
     def forward(self, img_left, img_right):
         x_left = self.resnet(img_left)
         x_right = self.resnet(img_right)
         x = torch.cat((x_left, x_right), dim =1)
-        x = nn.ReLU()(self.fc1(x))
-        x = self.fc2(x)
+        #x = nn.ReLU()(self.fc1(x))
+        x = self.fc1(x)
         #x = torch.sigmoid(self.fc2(x))
         return x
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model = ResNet_baseline().to(device)
-for param in model.resnet.parameters():
-   param.requires_grad = False
+print(model)
+
 
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Number of trainable parameters: {trainable_params}")
+criterion=AsymmetricLoss(gamma_neg=2, gamma_pos=2, clip=0)
 
-# from efficientnet paper
-loss_weight = torch.tensor([1, 1.2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.2]).to(device)
-criterion = nn.BCEWithLogitsLoss(pos_weight=loss_weight)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 model_checkpoint_name = f'best_model_{timestamp}.pth'
 
-def train(model, num_epochs, train_dataloader, validation_dataloader):
+def train(model, num_epochs, train_dataloader, validation_dataloader, criterion):
 
     best_score = -1
     num = 0
-    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=10, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5, verbose=True)
 
     for epoch in range(num_epochs):
 
         model.train()  # set the model to training mode
-        pbar = tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}", ncols=100)
-        for (img_left, img_right), labels in pbar:
+        #pbar = tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}", ncols=100)
+        train_loss = 0
+        for batch in train_dataloader:
+            #print(batch.shape)
+            (images_left, images_right), labels = batch
             optimizer.zero_grad()
-            img_left, img_right = img_left.to(device), img_right.to(device)
+            img_left, img_right = images_left.to(device), images_right.to(device)
             labels = labels.to(device)
             outputs = model(img_left, img_right)
             loss = criterion(outputs, labels)
+            train_loss += loss
             loss.backward()
             optimizer.step()
+        print(f"train losss: {train_loss / len(train_dataloader):.4f}")
         # average_metric, kappa, f1, auc
         val_loss, average_score, kappa, f1, auc = evaluate(model, validation_dataloader, device, criterion)
         scheduler.step(val_loss)
@@ -156,6 +185,7 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
             best_score = average_score
             torch.save(model.state_dict(), model_checkpoint_name)
             print(f"Score increased to {average_score:.4f}. Model saved!")
+        print(f"  validation losss: {val_loss:.4f}")
         print(f"Epoch {epoch + 1}/{num_epochs}")
         print(f"  average score: {average_score:.4f}")
         print(f"  f1: {f1:.4f}")
@@ -165,35 +195,6 @@ def train(model, num_epochs, train_dataloader, validation_dataloader):
         #print("  Val Confusion Matrix:")
         #print(val_confusion)
 
-train(model, 50, train_dataloader, validation_dataloader)
+train(model, 20, train_dataloader, validation_dataloader, criterion)
 
 
-# class TestDataset(Dataset):
-#     def __init__(self, folder_path, transform=None):
-#         self.folder_path = folder_path
-#         self.transform = transform
-#         self.image_files = [f for f in os.listdir(folder_path) if f.endswith('.jpg')]
-
-#     def __len__(self):
-#         return len(self.image_files) // 2
-
-#     def __getitem__(self, idx):
-#         left_image_name = self.image_files[2 * idx]
-#         right_image_name = self.image_files[2 * idx + 1]
-
-#         image_id = int(left_image_name.split('_')[0])
-
-#         left_image = Image.open(os.path.join(self.folder_path, left_image_name))
-#         right_image = Image.open(os.path.join(self.folder_path, right_image_name))
-
-#         if self.transform:
-#             left_image = self.transform(left_image)
-#             right_image = self.transform(right_image)
-
-#         return left_image, right_image, image_id
-
-# transform = transforms.Compose([
-#     transforms.Resize((224, 224)),
-#     transforms.ToTensor(),])
-
-# test_loader = DataLoader(TestDataset('ODIR-5K_Testing_Images', transform=transform), batch_size=64, shuffle=False)
