@@ -52,40 +52,40 @@ def paired_transform(is_train, args):
             transforms.Normalize(mean, std)
         ]
 
-# class ODIRDataset(Dataset):
-#     def __init__(self, dataframe, img_dir, is_train, args):
-#         self.dataframe = dataframe
-#         self.img_dir = img_dir
-#         self.is_train = is_train
-#         self.random_transforms, self.basic_transforms = paired_transform(is_train, args)
+class ODIRDataset2eye(Dataset):
+    def __init__(self, dataframe, img_dir, is_train, args):
+        self.dataframe = dataframe
+        self.img_dir = img_dir
+        self.is_train = is_train
+        self.random_transforms, self.basic_transforms = paired_transform(is_train, args)
 
-#     def __len__(self):
-#         return len(self.dataframe)
+    def __len__(self):
+        return len(self.dataframe)
 
-#     def __getitem__(self, idx):
-#         left_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
-#         right_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
+    def __getitem__(self, idx):
+        left_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Left-Fundus'])
+        right_img_name = os.path.join(self.img_dir, self.dataframe.iloc[idx]['Right-Fundus'])
 
-#         left_image = Image.open(left_img_name)
-#         right_image = Image.open(right_img_name)
+        left_image = Image.open(left_img_name)
+        right_image = Image.open(right_img_name)
 
-#         values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
-#         labels = torch.tensor(values)
+        values = self.dataframe.iloc[idx][5:].values.astype(np.float32)
+        labels = torch.tensor(values)
 
-#         seed = torch.randint(0, 2**32, (1,)).item()
+        seed = torch.randint(0, 2**32, (1,)).item()
 
-#         if self.random_transforms:
-#             random_transform = transforms.Compose(self.random_transforms)
-#             torch.manual_seed(seed)  
-#             left_image = random_transform(left_image)
-#             torch.manual_seed(seed)  
-#             right_image = random_transform(right_image)
+        if self.random_transforms:
+            random_transform = transforms.Compose(self.random_transforms)
+            torch.manual_seed(seed)  
+            left_image = random_transform(left_image)
+            torch.manual_seed(seed)  
+            right_image = random_transform(right_image)
 
-#         basic_transform = transforms.Compose(self.basic_transforms)
-#         left_image = basic_transform(left_image)
-#         right_image = basic_transform(right_image)
+        basic_transform = transforms.Compose(self.basic_transforms)
+        left_image = basic_transform(left_image)
+        right_image = basic_transform(right_image)
 
-#         return (left_image, right_image), labels
+        return (left_image, right_image), labels
 
 
 def build_transform(is_train, args):
