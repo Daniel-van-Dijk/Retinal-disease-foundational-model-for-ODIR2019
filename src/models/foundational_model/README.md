@@ -1,6 +1,6 @@
 ## Author Note
 
-'Single' means that it was used for two pipeline method. Code works the same. This branch uses 4-fold cross validation.
+'Single' means that it was used for two pipeline method. 'Both' for two. Code works the same. This branch uses 4-fold cross validation. Any file that begins with 'main_finetune' should be runned, depending on the method.
 
 
 ## RETFound - A foundation model for retinal imaging
