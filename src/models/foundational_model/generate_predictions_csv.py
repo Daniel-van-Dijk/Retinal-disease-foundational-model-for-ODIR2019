@@ -181,7 +181,7 @@ def main(args):
 
     cudnn.benchmark = True
     
-    test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
+    test_loader = DataLoader(TestDataset('/home/scur0594/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
     print(device)
@@ -198,7 +198,7 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/runs/extra_augment_classweighting.pth'
+    checkpoint_path = '/home/scur0556/ODIR2019/src/models/foundational_model/run_4193859/best_score_checkpoint.pth'
     checkpoint = torch.load(checkpoint_path, map_location=device) 
     state_dict = checkpoint['model_state_dict']
     model_sd_keys = set(model.state_dict().keys())
@@ -218,7 +218,7 @@ def main(args):
     model.eval()
 
     # check logit_output param
-    save_predictions(model, test_loader, device, 'prob_predictions.csv', logit_output=True)
+    save_predictions(model, test_loader, device, 'prob_predictions_random.csv', logit_output=True)
     #save_predictions(model, test_loader, device, 'logit_predictions.csv', logit_output=False)
 
 
@@ -231,10 +231,10 @@ def save_predictions(model, dataloader, device, output_file, logit_output=True):
 
 
     with torch.no_grad():
-        for (images_left, images_right, image_ids) in dataloader:
-            images_left, images_right = images_left.to(device), images_right.to(device)
+        for images, image_ids in dataloader:
+            images = images.to(device)
 
-            output = model(images_left, images_right)
+            output = model(images)
             # set logit_output = True when model outputs logits so NO sigmoid applied in forward of model
             # set logit_output = False when model outputs probs
             if logit_output:
