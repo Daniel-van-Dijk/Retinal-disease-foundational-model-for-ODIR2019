@@ -26,7 +26,7 @@ from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset, ODIRDataset
+from util.datasets import build_dataset, ODIRDataset, save_batch_images, TestDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
@@ -37,6 +37,10 @@ from engine_finetune import train_one_epoch, evaluate, focal_multilabel_loss
 from sklearn.model_selection import KFold
 import openpyxl
 from generate_predictions_csv import save_predictions
+from util.asymmetric_loss import AsymmetricLossOptimized
+from sklearn.utils import shuffle
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
 
 
 
@@ -157,8 +161,9 @@ def get_args_parser():
 
     return parser
 
-def main(args, fold):
-    misc.init_distributed_mode(args)
+def main(args, fold, mode, best_path, balanced_df):
+    if fold == 0:
+        misc.init_distributed_mode(args)
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
@@ -210,24 +215,41 @@ def main(args, fold):
     original_df = pd.read_excel('/home/scur0594/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx', engine='openpyxl')
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     print(original_df[disease_columns].sum() / len(original_df) * 100)
-    balanced_df = pd.read_csv('/home/scur0594/ODIR2019/data/balanced_df.csv')
-    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+    #balanced_df = pd.read_csv('/home/scur0594/ODIR2019/data/balanced_df.csv')
+    #balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
     
     print(balanced_df[disease_columns].sum() / len(balanced_df) * 100)
 
-    # Perform 4-fold cross-validation
-    total_folds = 4
-    fold_size = len(original_df) // total_folds
+    valid_rows = []
+    for idx, row in balanced_df.iterrows():
+        left_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Left-Fundus'])
+        right_img_name = os.path.join('data/cropped_ODIR-5K_Training_Dataset', row['Right-Fundus'])
 
-    # Determine train and validation indices based on the current fold
-    val_start = fold * fold_size
-    val_end = val_start + fold_size
-    val_indices = list(range(val_start, val_end))
-    train_indices = [idx for idx in range(len(original_df)) if idx not in val_indices]
+        if left_img_name not in low_quality_files and right_img_name not in low_quality_files:
+            valid_rows.append(row)
+    balanced_df = pd.DataFrame(valid_rows)
 
-    # Create train and validation dataframes
-    train_df = original_df.iloc[train_indices]
-    validation_df = original_df.iloc[val_indices]
+    # Use only the first 100 rows of the original_df
+    #original_df = original_df.head(40)
+
+    if mode == 0:
+
+        # Perform 4-fold cross-validation
+        total_folds = 4
+        fold_size = len(balanced_df) // total_folds
+
+        # Determine train and validation indices based on the current fold
+        val_start = fold * fold_size
+        val_end = val_start + fold_size
+        val_indices = list(range(val_start, val_end))
+        train_indices = [idx for idx in range(len(balanced_df)) if idx not in val_indices]
+
+        # Create train and validation dataframes
+        train_df = balanced_df.iloc[train_indices]
+        validation_df = balanced_df.iloc[val_indices]
+
+    else:
+        train_df, validation_df = train_test_split(balanced_df, test_size=0.2, random_state=42)
 
     print(train_df[disease_columns].sum() / len(train_df) * 100)
     print('---')
@@ -302,32 +324,34 @@ def main(args, fold):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
     
-    base_vit_model = models_vit.__dict__[args.model](
-        num_classes=args.nb_classes,
-        drop_path_rate=args.drop_path,
-        global_pool=args.global_pool,
-    )
-    # Instantiate a pre-trained Vision Transformer model.
+
+        # Instantiate a pre-trained Vision Transformer model.
     base_vit_model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,  # May not be necessary depending on your needs.
         drop_path_rate=args.drop_path,
         global_pool=args.global_pool,
     )
 
-    # Extract the model's weights for fine-tuning, if applicable.
-    if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
-        print("Load pre-trained checkpoint from: %s" % args.finetune)
-        
-        # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint['model']:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint['model'][k]
+    
 
-        # Load pre-trained weights into the Vision Transformer model.
-        # Note: Adaptation might be needed depending on checkpoint format.
-        base_vit_model.load_state_dict(checkpoint['model'], strict=False)
+    if mode == 0:
+        # Extract the model's weights for fine-tuning, if applicable.
+        if args.finetune and not args.eval:
+            checkpoint = torch.load(args.finetune, map_location='cpu')
+            print("Load pre-trained checkpoint from: %s" % args.finetune)
+            
+            # Potentially modify checkpoint as per your requirements (e.g., remove classification head)
+            for k in ['head.weight', 'head.bias']:
+                if k in checkpoint['model']:
+                    print(f"Removing key {k} from pretrained checkpoint")
+                    del checkpoint['model'][k]
+
+            # Load pre-trained weights into the Vision Transformer model.
+            # Note: Adaptation might be needed depending on checkpoint format.
+            base_vit_model.load_state_dict(checkpoint['model'], strict=False)
+    else:
+        checkpoint = torch.load(best_path, map_location='cpu')
+        base_vit_model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 
     
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
@@ -385,8 +409,8 @@ def main(args, fold):
     # print(class_weights)
     # class_weights = torch.tensor(class_weights).to(device)
 
-    #criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = AsymmetricLossOptimized()
+    #criterion = torch.nn.BCEWithLogitsLoss()
 
 
     print("criterion = %s" % str(criterion))
@@ -406,7 +430,16 @@ def main(args, fold):
     best_final_score_per_fold = 0.0
     checkpoint_path_per_fold = os.path.join(args.output_dir, f'best_model_checkpoint_fold_{fold}.pth')
 
+    final_scores_list = []
 
+    max_increasing_epochs = 2  # Set the maximum number of consecutive increasing epochs for early stopping
+    increasing_epochs = 0  # Counter to keep track of consecutive increasing epochs
+
+    # Initialize learning rate scheduler
+    scheduler = CosineAnnealingLR(optimizer, T_max=len(data_loader_train))
+
+    best_final_score = 0.0  # Variable to keep track of the best final score
+    previous_val_loss = float('inf')  # Variable to keep track of previous validation loss
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -414,12 +447,13 @@ def main(args, fold):
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, loss_scaler, args.clip_grad, mixup_fn, log_writer=log_writer, args=args)
 
         val_loss, final_score, kappa, f1, auc = evaluate(model, data_loader_val, device, criterion)
+        final_scores_list.append(final_score)
 
         # Log validation metrics
         print(f"Validation Loss: {val_loss:.4f}, Final Score: {final_score:.4f}, Kappa: {kappa:.4f}, F1: {f1:.4f}, AUC: {auc:.4f}")
 
         # Check if this is the best model for this fold
-        if final_score > best_final_score_per_fold:
+        if final_score > best_final_score_per_fold and val_loss < 0.3:
             best_final_score_per_fold = final_score
 
             # Save the current best model for this fold
@@ -431,9 +465,23 @@ def main(args, fold):
             }
             torch.save(checkpoint, checkpoint_path_per_fold)
             print(f"Best model for fold {fold} saved at {checkpoint_path_per_fold}")
-        
 
-            
+        # Apply learning rate scheduling
+        scheduler.step()
+
+        # Implement early stopping based on validation loss increasing for 5 consecutive epochs
+        if val_loss > previous_val_loss:
+            increasing_epochs += 1
+            print(f"Validation loss is increasing for {increasing_epochs} consecutive epochs.")
+            if increasing_epochs >= max_increasing_epochs:
+                print(f"Stopping early after {max_increasing_epochs} consecutive increasing epochs.")
+                break
+        else:
+            increasing_epochs = 0  # Reset the counter if validation loss decreases
+        
+        previous_val_loss = val_loss
+
+
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}
@@ -445,17 +493,23 @@ def main(args, fold):
                 f.write(json.dumps(log_stats) + "\n")
 
                 
+    average_final_score = sum(final_scores_list) / len(final_scores_list)
+    print(f"Average Final Score across all folds: {average_final_score:.4f}")
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-    checkpoint_path = os.path.join(args.output_dir, 'best_model_checkpoint.pth')
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
-    test_loader = torch.utils.data.DataLoader(torch.utils.data.TestDataset('/home/scur0594/ODIR2019/data/cropped_ODIR-5K_Testing_Dataset', is_train=False, args=args), batch_size=16, shuffle=False)
-    output_path = os.path.join(args.output_dir, f'prob_predictions_fold_{fold}.csv')
-    save_predictions(model, test_loader, device, output_path, logit_output=True)
+    if mode == 1:
+        checkpoint_path = os.path.join(args.output_dir, f'best_model_checkpoint_fold_{fold}.pth')
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        test_loader = torch.utils.data.DataLoader(TestDataset('/home/scur0594/ODIR2019/data/cropped_ODIR-5K_Testing_Dataset', is_train=False, args=args), batch_size=16, shuffle=False)
+        output_path = os.path.join(args.output_dir,'prob_prediction.csv')
+        save_predictions(model, test_loader, device, output_path, logit_output=True)
+
+    return average_final_score
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -464,7 +518,40 @@ if __name__ == '__main__':
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
+    best_avg = []
+    average = 0.0
+    mode = 0
+
+
+    #balanced_df = pd.read_excel('/home/scur0594/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx', engine='openpyxl')
+    balanced_df = pd.read_csv('/home/scur0594/ODIR2019/data/balanced_df.csv')
+    balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
+
+    # Assuming balanced_df is your DataFrame
+    shuffled_balanced_df = shuffle(balanced_df).reset_index(drop=True)
+
+
     # Perform 4-fold cross-validation
     for fold in range(4):
         print(f"Fold {fold + 1}")
-        main(args, fold)
+        average = main(args, fold, mode, 'a', shuffled_balanced_df)
+        best_avg.append(average)
+
+    # Assuming best_avg is your list containing average values
+    # Find the index of the highest value in the list
+    highest_value_index = best_avg.index(max(best_avg))
+
+    # Construct the file path using the highest value's corresponding fold
+    fold = highest_value_index  # Fold is the position in the array
+    file_path = os.path.join(args.output_dir, f'best_model_checkpoint_fold_{fold}.pth')
+
+    # Print the file path
+    print("File path of the model with the highest average value:", file_path)
+
+    d = 99
+    score = 0.0
+    final = 50
+    final_score = 0.0
+    mode = 1
+
+    final_score = main(args, final, mode, file_path, shuffled_balanced_df)
