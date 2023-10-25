@@ -43,3 +43,8 @@ class VisionTransformer(nn.Module):
         logits = self.classification_head(combined_features)
 
         return logits
+
+        # Pass through the classification head
+        logits = self.classification_head(combined_features)
+
+        return logits
