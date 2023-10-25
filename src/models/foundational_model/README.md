@@ -1,3 +1,8 @@
+## Author Note
+
+'Single' means that it was used for two pipeline method. Code works the same. This branch uses 4-fold cross validation.
+
+
 ## RETFound - A foundation model for retinal imaging
 
 
