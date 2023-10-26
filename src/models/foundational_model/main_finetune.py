@@ -204,45 +204,23 @@ def main(args):
 
     
     disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
-    # original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
-    # original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    
-    # print(original_df[disease_columns].sum() / len(original_df) * 100)
-    # balanced_df = pd.read_csv('/home/scur0556/ODIR2019/data/balanced_df.csv')
-    # balanced_df = balanced_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-    original_df = pd.read_csv("/home/scur0556/ODIR2019/data/expanded_sheet_annotations_fixed.csv")
+     
+    disease_columns = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
+    original_df = pd.read_excel('/home/scur0556/ODIR2019/data/ODIR-5K_Training_Annotations(Updated)_V2.xlsx')
     original_df = original_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
-
-    import math
-    print(len(original_df))
-    valid_rows = []
-    for idx, row in original_df.iterrows():
-        ##print(row['Right-Fundus'])
+    
+    expanded_df = pd.read_csv("/home/scur0556/ODIR2019/data/expanded_sheet_annotations_fixed.csv")
+    expanded_df = expanded_df.drop(columns=['Left-Diagnostic Keywords', 'Right-Diagnostic Keywords'])
 
 
+    low_quality_files_set = set(low_quality_files)
 
-        if not pd.isna(row['Left-Fundus']):
-            img = row['Left-Fundus']
-        else:
-            img = None
-        if not pd.isna(row['Right-Fundus']):
-            img = row['Right-Fundus']
-        else:
-            img = None
+   
+    original_df = original_df[~original_df['Left-Fundus'].isin(low_quality_files_set) & ~original_df['Right-Fundus'].isin(low_quality_files_set)]
 
-        #print(left_img_name)
-        if img not in low_quality_files:
-            valid_rows.append(row)
-    original_df = pd.DataFrame(valid_rows)
-    print(len(original_df))
-
-    #skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
-    #for fold, (train_idx, val_idx) in enumerate(skf.split(original_df)):
-    #print("train set length", len(train_df))
-    #print("val set length", len(validation_df))
-    #datasetseed = 21
-    #train_df, validation_df = train_test_split(original_df, test_size=0.2, random_state=datasetseed)
-
+    valid_ids = original_df['ID'].unique().tolist()
+    expanded_df = expanded_df[expanded_df['ID'].isin(valid_ids)]
+    
     unique_ids = original_df['ID'].unique().tolist()
     shuffled_ids = pd.Series(unique_ids).sample(frac=1, random_state=42).tolist()
 
@@ -250,24 +228,12 @@ def main(args):
     train_patient_ids = shuffled_ids[:train_size]
     val_patient_ids = shuffled_ids[train_size:]
 
-    train_df = original_df[original_df['ID'].isin(train_patient_ids)]
-    validation_df = original_df[original_df['ID'].isin(val_patient_ids)]
+    expanded_train_df = expanded_df[expanded_df['ID'].isin(train_patient_ids)]
+    expanded_validation_df = expanded_df[expanded_df['ID'].isin(val_patient_ids)]
 
-    #print("dataset seed", datasetseed)
-    #train_ids, val_ids = train_test_split(original_df['ID'], test_size=0.2, random_state=42)
-    
-    # Using original + augmented for training
-    # train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
-    #train_df = balanced_df[balanced_df['ID'].isin(train_ids)]
-   
-    print(train_df[disease_columns].sum() / len(train_df) * 100)
-    print('---')
 
-    # Using only original samples for validation so no duplicates and no patient in train and val at the same time
-    #validation_df = original_df[original_df['ID'].isin(val_ids)]
-
-    dataset_train = ODIRDataset(train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
-    dataset_val = ODIRDataset(validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
+    dataset_train = ODIRDataset(expanded_train_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=True, args=args)
+    dataset_val = ODIRDataset(expanded_validation_df, '/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Training_Dataset', is_train=False, args=args)
     
 
     if True:  # args.distributed:
@@ -341,7 +307,7 @@ def main(args):
 
     
     model = ODIRmodel(base_vit_model=base_vit_model, num_classes=args.nb_classes) 
-    print('odir', model)
+    #print('odir', model)
     
 
     model.to(device)
@@ -360,15 +326,13 @@ def main(args):
     #         layer.p = 0.3
 
 
-    #model.base_vit_model.blocks[20].mlp.drop.p = 0.5
+    # for i in range(19, 24):  
+    #     model.base_vit_model.blocks[i].mlp.drop.p = 0.8
+    #     model.base_vit_model.blocks[i].attn.proj_drop.p = 0.8
+    #     model.base_vit_model.blocks[i].attn.attn_drop.p = 0.8
 
-    model.base_vit_model.blocks[21].mlp.drop.p = 0.5
 
-    model.base_vit_model.blocks[22].mlp.drop.p = 0.5
-
-    model.base_vit_model.blocks[23].mlp.drop.p = 0.5
-
-    print("model with dropout")
+    # print("model with dropout")
     print(model)
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)

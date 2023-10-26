@@ -16,42 +16,19 @@ from tqdm.notebook import tqdm
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
-from torchvision.models import ResNet50_Weights
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+import torchvision.models as models
 import csv
+import datetime
+from models.foundational_model.util.datasets import *
+from models.foundational_model.util.asymmetric_loss import *
+from collections import namedtuple
 import torch.nn.functional as F
 
 
+Args = namedtuple('Args', ['input_size'])
+args = Args(input_size=224)
 
-class TestDataset(Dataset):
-    def __init__(self, folder_path, transform=None):
-        self.folder_path = folder_path
-        self.transform = transform
-        self.image_files = [f for f in os.listdir(folder_path) if f.endswith('.jpg')]
-
-    def __len__(self):
-        return len(self.image_files) // 2
-
-    def __getitem__(self, idx):
-        left_image_name = self.image_files[2 * idx]
-        right_image_name = self.image_files[2 * idx + 1]
-
-        image_id = int(left_image_name.split('_')[0])
-
-        left_image = Image.open(os.path.join(self.folder_path, left_image_name))
-        right_image = Image.open(os.path.join(self.folder_path, right_image_name))
-
-        if self.transform:
-            left_image = self.transform(left_image)
-            right_image = self.transform(right_image)
-
-        return left_image, right_image, image_id
-
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),])
-
-test_loader = DataLoader(TestDataset('/home/scur0547/ODIR2019/data/cropped_ODIR-5K_Testing_Images', transform=transform), batch_size=64, shuffle=False)
+test_loader = DataLoader(TestDataset('/home/scur0556/ODIR2019/data/cropped_ODIR-5K_Testing_Images', is_train=False, args=args), batch_size=16, shuffle=False)
 
 
 
@@ -64,14 +41,14 @@ def save_predictions(model, dataloader, device, output_file, logit_output=True):
 
 
     with torch.no_grad():
-        for (images_left, images_right, image_ids) in tqdm(dataloader):
+        for (images_left, images_right, image_ids) in dataloader:
             images_left, images_right = images_left.to(device), images_right.to(device)
 
             output = model(images_left, images_right)
             # set logit_output = True when model outputs logits so NO sigmoid applied in forward of model
             # set logit_output = False when model outputs probs
             if logit_output:
-              output = F.sigmoid(output)  # Convert logits to probabilities
+              output = torch.sigmoid(output)  # Convert logits to probabilities
 
             all_ids.extend(image_ids.cpu().numpy())
             all_probs.append(output.cpu().numpy())
@@ -89,12 +66,29 @@ def save_predictions(model, dataloader, device, output_file, logit_output=True):
 device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 print(device)
 
+class ResNet_baseline(nn.Module):
+    def __init__(self, num_diseases=8):
+        super(ResNet_baseline, self).__init__()
+        self.resnet = models.resnet50(pretrained=True)
+        self.resnet.fc = nn.Identity()
+        self.fc1 = nn.Linear(2 * 2048, 8)
+        #self.fc2 = nn.Linear(256, num_diseases)
 
+    def forward(self, img_left, img_right):
+        x_left = self.resnet(img_left)
+        x_right = self.resnet(img_right)
+        x = torch.cat((x_left, x_right), dim =1)
+        #x = nn.ReLU()(self.fc1(x))
+        x = self.fc1(x)
+        #x = torch.sigmoid(self.fc2(x))
+        return x
 
-model = VisionTransformer(8).to(device)
-checkpoint = torch.load("/home/scur0547/ODIR2019/best_model_20231003_1437.pth", map_location=device)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+model = ResNet_baseline().to(device)
+checkpoint = torch.load("/home/scur0556/ODIR2019/best_model_20231024_1056.pth", map_location=device)
 model.load_state_dict(checkpoint)
 
 # check logit_output param
-save_predictions(model, test_loader, 'cuda', 'prob_predictions.csv', logit_output=True)
-save_predictions(model, test_loader, 'cuda', 'logit_predictions.csv', logit_output=False)
+save_predictions(model, test_loader, 'cuda', 'resnet_baseline1.csv', logit_output=True)
+#save_predictions(model, test_loader, 'cuda', 'resnet_baseline2.csv', logit_output=False)
